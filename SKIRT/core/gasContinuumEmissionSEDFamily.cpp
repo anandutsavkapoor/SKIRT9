@@ -41,9 +41,9 @@ Range gasContinuumEmissionSEDFamily::intrinsicWavelengthRange() const
 double gasContinuumEmissionSEDFamily::specificLuminosity(double wavelength, const Array& parameters) const
 {
 	
-    double logU      = parameters[0];
-    double Z         = parameters[1];
-    int EmissionBool = parameters[2];
+    double logU         = parameters[0];
+    double Z            = parameters[1];
+    double EmissionBool = parameters[2];
 
     return EmissionBool * _table(wavelength, logU, Z);
 }
@@ -53,9 +53,9 @@ double gasContinuumEmissionSEDFamily::specificLuminosity(double wavelength, cons
 double gasContinuumEmissionSEDFamily::cdf(Array& lambdav, Array& pv, Array& Pv, const Range& wavelengthRange,
                                     const Array& parameters) const
 {
-    double logU      = parameters[0];
-    double Z         = parameters[1];
-    int EmissionBool = parameters[2];
+    double logU         = parameters[0];
+    double Z            = parameters[1];
+    double EmissionBool = parameters[2];
 
     return EmissionBool * _table.cdf(lambdav, pv, Pv, wavelengthRange, logU, Z);
 }
