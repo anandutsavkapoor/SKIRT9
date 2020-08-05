@@ -16,11 +16,12 @@ void gasContinuumEmissionSEDFamily::setupSelfBefore()
 }
 
 ////////////////////////////////////////////////////////////////////
+// add units to Ionising Luminosity
 
 vector<SnapshotParameter> gasContinuumEmissionSEDFamily::parameterInfo() const
 {
     return vector<SnapshotParameter>{
-        {"logU"}, {"metallicity"},{"IonisingLum", "Luminosity", "W"},{"EmissionBool"}
+        {"logU"}, {"metallicity"},{"IonisingLum"},{"EmissionBool"}
     };
 }
 
