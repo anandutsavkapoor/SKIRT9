@@ -20,7 +20,7 @@ void gasContinuumEmissionSEDFamily::setupSelfBefore()
 vector<SnapshotParameter> gasContinuumEmissionSEDFamily::parameterInfo() const
 {
     return vector<SnapshotParameter>{
-        {"logU"}, {"metallicity"}, {"EmissionBool"}
+        {"logU"}, {"metallicity"},{"IonisingLum", "Luminosity", "W"},{"EmissionBool"}
     };
 }
 
@@ -42,9 +42,10 @@ double gasContinuumEmissionSEDFamily::specificLuminosity(double wavelength, cons
 
     double logU         = parameters[0];
     double Z            = parameters[1];
-    double EmissionBool = parameters[2];
+    double IonisingLum  = parameters[2];
+    double EmissionBool = parameters[3];
 
-    return EmissionBool * _table(wavelength, logU, Z);
+    return IonisingLum * EmissionBool * _table(wavelength, logU, Z);
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -54,9 +55,10 @@ double gasContinuumEmissionSEDFamily::cdf(Array& lambdav, Array& pv, Array& Pv, 
 {
     double logU         = parameters[0];
     double Z            = parameters[1];
-    double EmissionBool = parameters[2];
+    double IonisingLum  = parameters[2];
+    double EmissionBool = parameters[3];
 
-    return EmissionBool * _table.cdf(lambdav, pv, Pv, wavelengthRange, logU, Z);
+    return IonisingLum * EmissionBool * _table.cdf(lambdav, pv, Pv, wavelengthRange, logU, Z);
 }
 
 ////////////////////////////////////////////////////////////////////
