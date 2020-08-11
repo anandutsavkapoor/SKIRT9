@@ -3,8 +3,8 @@
 ////       © Astronomical Observatory, Ghent University         ////
 ///////////////////////////////////////////////////////////////// */
 
-#ifndef GASCONTINUUMEMISSIONSEDFAMILY_HPP
-#define GASCONTINUUMEMISSIONSEDFAMILY_HPP
+#ifndef GASLINEEMISSIONSEDFAMILY_HPP
+#define GASLINEEMISSIONSEDFAMILY_HPP
 
 #include "SEDFamily.hpp"
 #include "StoredTable.hpp"
