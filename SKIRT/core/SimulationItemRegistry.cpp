@@ -315,7 +315,8 @@ SimulationItemRegistry::SimulationItemRegistry(string version, string format)
     ItemRegistry::add<LyaDoublePeakedSEDFamily>();
     ItemRegistry::add<LyaSEDFamilyDecorator>();
     ItemRegistry::add<gasContinuumEmissionSEDFamily>();
-
+    ItemRegistry::add<gasLineEmissionSEDFamily>();
+    
     // wavelength distributions
     ItemRegistry::add<WavelengthDistribution>();
     ItemRegistry::add<RangeWavelengthDistribution>();
