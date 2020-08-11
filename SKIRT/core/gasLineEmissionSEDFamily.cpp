@@ -8,7 +8,7 @@
 
 ////////////////////////////////////////////////////////////////////
 
-void gasContinuumEmissionSEDFamily::setupSelfBefore()
+void gasLineEmissionSEDFamily::setupSelfBefore()
 {
     SEDFamily::setupSelfBefore();
 
@@ -18,7 +18,7 @@ void gasContinuumEmissionSEDFamily::setupSelfBefore()
 ////////////////////////////////////////////////////////////////////
 // add units to Ionising Luminosity
 
-vector<SnapshotParameter> gasContinuumEmissionSEDFamily::parameterInfo() const
+vector<SnapshotParameter> gasLineEmissionSEDFamily::parameterInfo() const
 {
     return vector<SnapshotParameter>{
         {"logU"}, {"metallicity"},{"IonisingLum"},{"EmissionBool"}
@@ -29,7 +29,7 @@ vector<SnapshotParameter> gasContinuumEmissionSEDFamily::parameterInfo() const
 
 // Incomplete: Throw error if outside range
 
-Range gasContinuumEmissionSEDFamily::intrinsicWavelengthRange() const
+Range gasLineEmissionSEDFamily::intrinsicWavelengthRange() const
 {
     return _table.axisRange<0>();
 }
@@ -38,7 +38,7 @@ Range gasContinuumEmissionSEDFamily::intrinsicWavelengthRange() const
 ////////////////////////////////////////////////////////////////////
 
 
-double gasContinuumEmissionSEDFamily::specificLuminosity(double wavelength, const Array& parameters) const
+double gasLineEmissionSEDFamily::specificLuminosity(double wavelength, const Array& parameters) const
 {
 
     double logU         = parameters[0];
@@ -51,7 +51,7 @@ double gasContinuumEmissionSEDFamily::specificLuminosity(double wavelength, cons
 
 ////////////////////////////////////////////////////////////////////
 
-double gasContinuumEmissionSEDFamily::cdf(Array& lambdav, Array& pv, Array& Pv, const Range& wavelengthRange,
+double gasLineEmissionSEDFamily::cdf(Array& lambdav, Array& pv, Array& Pv, const Range& wavelengthRange,
                                     const Array& parameters) const
 {
     double logU         = parameters[0];
