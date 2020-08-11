@@ -80,6 +80,7 @@
 #include "FullInstrument.hpp"
 #include "GammaGeometry.hpp"
 #include "gasContinuumEmissionSEDFamily.hpp"
+#include "gasLineEmissionSEDFamily.hpp"
 #include "GaussianGeometry.hpp"
 #include "GeometricMedium.hpp"
 #include "GeometricSource.hpp"
