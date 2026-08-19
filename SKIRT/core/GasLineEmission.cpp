@@ -3,20 +3,56 @@
 ////       © Astronomical Observatory, Ghent University         ////
 ///////////////////////////////////////////////////////////////// */
 
-#include "NebularLineEmission.hpp"
+#include "GasLineEmission.hpp"
+#include "Constants.hpp"
+#include <fstream>
+#include <set>
+#include <sstream>
+#include <stdexcept>
 
 //////////////////////////////////////////////////////////////////////
 
-constexpr double NebularLineEmission::lineWavelengths[NebularLineEmission::numLines];
-constexpr double NebularLineEmission::lineMasses[NebularLineEmission::numLines];
-constexpr int NebularLineEmission::lineCarrierIonIndex[NebularLineEmission::numLines];
-constexpr int NebularLineEmission::lineElementIndex[NebularLineEmission::numLines];
+constexpr double GasLineEmission::lineWavelengths[GasLineEmission::numLines];
+constexpr double GasLineEmission::lineMasses[GasLineEmission::numLines];
+constexpr int GasLineEmission::lineCarrierIonIndex[GasLineEmission::numLines];
+constexpr int GasLineEmission::lineElementIndex[GasLineEmission::numLines];
 
 //////////////////////////////////////////////////////////////////////
 
 namespace
 {
-    // ============== H recombination line data (Storey & Hummer 1995) ==============
+    // the mutable registry storage behind lineRegistry(): the built-in lines at construction,
+    // extended in place by extendLineRegistry()
+    std::vector<GasLineEmission::LineDef>& mutableLineRegistry()
+    {
+        static std::vector<GasLineEmission::LineDef> registry = [] {
+            std::vector<GasLineEmission::LineDef> v;
+            v.reserve(GasLineEmission::numLines);
+            for (int k = 0; k != GasLineEmission::numLines; ++k)
+            {
+                v.push_back({GasLineEmission::lineWavelengths[k], GasLineEmission::lineMasses[k],
+                             GasLineEmission::lineCarrierIonIndex[k], GasLineEmission::lineElementIndex[k],
+                             k >= GasLineEmission::HeI5876 && k <= GasLineEmission::HeI10830,
+                             k >= GasLineEmission::HeII1640 && k <= GasLineEmission::HeII4686});
+            }
+            return v;
+        }();
+        return registry;
+    }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+const std::vector<GasLineEmission::LineDef>& GasLineEmission::lineRegistry()
+{
+    return mutableLineRegistry();
+}
+
+//////////////////////////////////////////////////////////////////////
+
+namespace
+{
+    // ============== Legacy H recombination data: P_B tables (Storey & Hummer 1995) ==============
 
     // Temperature grid: 10 points from 500 K to 30000 K (non-uniform in log space)
     constexpr int pbNumT = 10;
@@ -201,20 +237,20 @@ namespace
     {
         switch (lineIdx)
         {
-            case NebularLineEmission::Lya: return interpolate_PB(P_Lya, T, ne);
-            case NebularLineEmission::Ha: return interpolate_PB(P_Ha, T, ne);
-            case NebularLineEmission::Hb: return interpolate_PB(P_Hb, T, ne);
-            case NebularLineEmission::Hg: return interpolate_PB(P_Hg, T, ne);
-            case NebularLineEmission::Hd: return interpolate_PB(P_Hd, T, ne);
-            case NebularLineEmission::HeBalmer: return interpolate_PB(P_He, T, ne);
-            case NebularLineEmission::Paa: return interpolate_PB(P_Paa, T, ne);
-            case NebularLineEmission::Pab: return interpolate_PB(P_Pab, T, ne);
-            case NebularLineEmission::Bra: return interpolate_PB(P_Bra, T, ne);
+            case GasLineEmission::Lya: return interpolate_PB(P_Lya, T, ne);
+            case GasLineEmission::Ha: return interpolate_PB(P_Ha, T, ne);
+            case GasLineEmission::Hb: return interpolate_PB(P_Hb, T, ne);
+            case GasLineEmission::Hg: return interpolate_PB(P_Hg, T, ne);
+            case GasLineEmission::Hd: return interpolate_PB(P_Hd, T, ne);
+            case GasLineEmission::HeBalmer: return interpolate_PB(P_He, T, ne);
+            case GasLineEmission::Paa: return interpolate_PB(P_Paa, T, ne);
+            case GasLineEmission::Pab: return interpolate_PB(P_Pab, T, ne);
+            case GasLineEmission::Bra: return interpolate_PB(P_Bra, T, ne);
             default: return 0.;
         }
     }
 
-    // ============== Metal forbidden line data (CHIANTI collisional excitation) ==============
+    // ============== Legacy collisional-excitation rate tables q_col(T, n_e) (CHIANTI) ==============
 
     // Grid for q_col tables: 21 temperatures x 19 densities
     constexpr int qcNumT = 21;
@@ -254,13 +290,14 @@ namespace
         return yval;
     }
 
-    // ============== Physical constants (SI, used by public dispatch functions) ==============
+    // ============== Physical constants (SI, legacy paths) ==============
 
+    // used by the legacy paths; Constants::h() differs by 8.8e-8 relative
     constexpr double h_SI = 6.62607015e-34;  // [J s]
     constexpr double c_SI = 2.99792458e8;    // [m/s]
 
-    // Metal forbidden line q_col tables from CHIANTI statistical equilibrium,
-    // following the tabulation of McClymont, Smith & Tacchella (2025).
+    // q_col tables for the built-in collisional lines (CHIANTI statistical equilibrium,
+    // following the tabulation of McClymont, Smith & Tacchella 2025)
     // log10(q_col) in cm^3/s, indexed as [ne_index][T_index], dimensions 19 x 21
 
     // [NII] 6548: 2s^2 2p^2 3P_1 -> 2s^2 2p^2 1D_2
@@ -721,17 +758,17 @@ namespace
     {
         switch (lineIdx)
         {
-            case NebularLineEmission::NII6548: return log_qcol_NII_6548;
-            case NebularLineEmission::NII6583: return log_qcol_NII_6583;
-            case NebularLineEmission::OI6300: return logQcolOI6300;
-            case NebularLineEmission::OI6364: return logQcolOI6364;
-            case NebularLineEmission::OII3729: return log_qcol_OII_3729;
-            case NebularLineEmission::OII3726: return log_qcol_OII_3726;
-            case NebularLineEmission::OIII4363: return log_qcol_OIII_4363;
-            case NebularLineEmission::OIII4959: return log_qcol_OIII_4959;
-            case NebularLineEmission::OIII5007: return log_qcol_OIII_5007;
-            case NebularLineEmission::SII6716: return log_qcol_SII_6716;
-            case NebularLineEmission::SII6731: return log_qcol_SII_6731;
+            case GasLineEmission::NII6548: return log_qcol_NII_6548;
+            case GasLineEmission::NII6583: return log_qcol_NII_6583;
+            case GasLineEmission::OI6300: return logQcolOI6300;
+            case GasLineEmission::OI6364: return logQcolOI6364;
+            case GasLineEmission::OII3729: return log_qcol_OII_3729;
+            case GasLineEmission::OII3726: return log_qcol_OII_3726;
+            case GasLineEmission::OIII4363: return log_qcol_OIII_4363;
+            case GasLineEmission::OIII4959: return log_qcol_OIII_4959;
+            case GasLineEmission::OIII5007: return log_qcol_OIII_5007;
+            case GasLineEmission::SII6716: return log_qcol_SII_6716;
+            case GasLineEmission::SII6731: return log_qcol_SII_6731;
             default: return nullptr;
         }
     }
@@ -784,8 +821,8 @@ namespace
 
 //////////////////////////////////////////////////////////////////////
 
-double NebularLineEmission::hydrogenLineLuminosity(int lineIdx, double T, double ne, double gammaHI, double nHI,
-                                                   double V_cm3)
+double GasLineEmission::hydrogenLineLuminosity(int lineIdx, double T, double ne, double gammaHI, double nHI,
+                                               double V_cm3)
 {
     double PB = linePBonly(lineIdx, T, ne);
     double lambda_m = lineWavelengths[lineIdx];
@@ -796,13 +833,677 @@ double NebularLineEmission::hydrogenLineLuminosity(int lineIdx, double T, double
 
 //////////////////////////////////////////////////////////////////////
 
-double NebularLineEmission::metalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3)
+namespace
 {
-    double qcol = metalLineQcol(lineIdx, T, ne);
-    double lambda_m = lineWavelengths[lineIdx];
-    double hnu = h_SI * c_SI / lambda_m;
-    // L = h*nu * q_col * ne * nIon * V  [total luminosity in W]
-    return hnu * qcol * ne * nIon * V_cm3;
+    // ============== Case B recombination-line emissivity tables ==============
+
+    // 2D emissivity coefficient table eps(T, n_e) read from a SKIRT stored-table file
+    struct RecombTable
+    {
+        std::vector<double> Tgrid;  // temperature grid [K]
+        std::vector<double> ngrid;  // electron density grid [cm^-3]
+        std::vector<double> data;   // eps [W m3]; first axis (T) varies fastest
+    };
+
+    // registry mapping recombination lines to loaded emissivity tables; filled at setup by
+    // initializeRecombinationTables() and extended by extendLineRegistry(),
+    // read-only afterwards
+    struct RecombRegistry
+    {
+        bool ready = false;
+        std::vector<RecombTable> table = std::vector<RecombTable>(GasLineEmission::numLines);
+        std::vector<bool> loaded = std::vector<bool>(GasLineEmission::numLines, false);
+    };
+    RecombRegistry _recombRegistry;
+
+    std::uint64_t readStabUInt(std::ifstream& file)
+    {
+        std::uint64_t v = 0;
+        file.read(reinterpret_cast<char*>(&v), 8);
+        return v;
+    }
+
+    std::string readStabString(std::ifstream& file)
+    {
+        char buffer[8];
+        file.read(buffer, 8);
+        std::string s(buffer, 8);
+        return s.substr(0, s.find_last_not_of(" \n") + 1);
+    }
+
+    std::vector<double> readStabDoubles(std::ifstream& file, size_t n)
+    {
+        std::vector<double> v(n);
+        file.read(reinterpret_cast<char*>(v.data()), 8 * n);
+        return v;
+    }
+
+    // reads and validates a 2D stored-table file with logarithmic T/n axes and a
+    // logarithmic Emis quantity, replicating the layout handled by StoredTable
+    void readRecombStab(const std::string& path, RecombTable& table)
+    {
+        std::ifstream file(path, std::ios::binary);
+        if (!file.is_open()) throw std::runtime_error("Cannot open recombination table: " + path);
+        auto verify = [&path](bool condition, const char* what) {
+            if (!condition)
+                throw std::runtime_error(std::string("Invalid recombination table (") + what + "): " + path);
+        };
+        verify(readStabString(file) == "SKIRT X", "magic");
+        verify(readStabUInt(file) == 0x010203040A0BFEFFull, "endianness");
+        verify(readStabUInt(file) == 2, "axis count");
+        verify(readStabString(file) == "T" && readStabString(file) == "n", "axis names");
+        readStabString(file);  // axis units ("K", "1/cm3")
+        readStabString(file);
+        verify(readStabString(file) == "log" && readStabString(file) == "log", "axis scales");
+        table.Tgrid = readStabDoubles(file, readStabUInt(file));
+        table.ngrid = readStabDoubles(file, readStabUInt(file));
+        verify(readStabUInt(file) == 1, "quantity count");
+        verify(readStabString(file) == "Emis", "quantity name");
+        readStabString(file);  // quantity unit
+        verify(readStabString(file) == "log", "quantity scale");
+        table.data = readStabDoubles(file, table.Tgrid.size() * table.ngrid.size());
+        verify(readStabString(file) == "STABEND" && file.good(), "footer");
+    }
+
+    // clamped bin lookup for one logarithmic axis, replicating StoredTable::operator();
+    // sets the upper bin border index and returns the fraction of the value in the bin
+    double stabAxisFraction(const std::vector<double>& grid, double x, int& right)
+    {
+        right = static_cast<int>(std::lower_bound(grid.begin(), grid.end(), x) - grid.begin());
+        if (right == 0)
+        {
+            right = 1;
+            x = grid[0];
+        }
+        else if (right == static_cast<int>(grid.size()))
+        {
+            right--;
+            x = grid[right];
+        }
+        return (std::log(x) - std::log(grid[right - 1])) / (std::log(grid[right]) - std::log(grid[right - 1]));
+    }
+
+    // emissivity coefficient eps(T, ne) [W m3] interpolated with StoredTable semantics:
+    // out-of-range values clamped to the outer grid points, bilinear interpolation in
+    // log T and log ne of log eps, zero if a bordering table value is not positive
+    double recombEmissivity(const RecombTable& table, double T, double ne)
+    {
+        int iT, iN;
+        double fT = stabAxisFraction(table.Tgrid, T, iT);
+        double fN = stabAxisFraction(table.ngrid, ne, iN);
+        int numT = static_cast<int>(table.Tgrid.size());
+        double y = 0.;
+        for (int t = 0; t != 4; ++t)
+        {
+            int leftT = t & 1;
+            int leftN = (t >> 1) & 1;
+            double front = (leftT ? 1. - fT : fT) * (leftN ? 1. - fN : fN);
+            if (front)
+            {
+                double v = table.data[(iN - leftN) * numT + (iT - leftT)];
+                if (v <= 0.) return 0.;
+                y += front * std::log(v);
+            }
+        }
+        return std::exp(y);
+    }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+namespace
+{
+    // table files for the built-in recombination lines, mapped explicitly because the file
+    // labels follow per-set wavelength conventions (truncated vacuum for H I, air for He I,
+    // rounded vacuum for He II) while the line indices use air wavelengths for optical lines;
+    // no Case B table exists for Lyman-alpha
+    struct LineFile
+    {
+        int lineIdx;
+        const char* filename;
+    };
+    const std::vector<LineFile>& recombLineFiles()
+    {
+        static const std::vector<LineFile> table = {{GasLineEmission::Ha, "HI_CaseB_6564A_line.stab"},
+                                                    {GasLineEmission::Hb, "HI_CaseB_4862A_line.stab"},
+                                                    {GasLineEmission::Hg, "HI_CaseB_4341A_line.stab"},
+                                                    {GasLineEmission::Hd, "HI_CaseB_4102A_line.stab"},
+                                                    {GasLineEmission::HeBalmer, "HI_CaseB_3971A_line.stab"},
+                                                    {GasLineEmission::Paa, "HI_CaseB_18756A_line.stab"},
+                                                    {GasLineEmission::Pab, "HI_CaseB_12821A_line.stab"},
+                                                    {GasLineEmission::Bra, "HI_CaseB_40522A_line.stab"},
+                                                    {GasLineEmission::HeI5876, "HeI_CaseB_5876A_line.stab"},
+                                                    {GasLineEmission::HeI6678, "HeI_CaseB_6678A_line.stab"},
+                                                    {GasLineEmission::HeI7065, "HeI_CaseB_7065A_line.stab"},
+                                                    {GasLineEmission::HeI10830, "HeI_CaseB_10830A_line.stab"},
+                                                    {GasLineEmission::HeII1640, "HeII_CaseB_1640A_line.stab"},
+                                                    {GasLineEmission::HeII4686, "HeII_CaseB_4687A_line.stab"}};
+        return table;
+    }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void GasLineEmission::initializeRecombinationTables(const std::string& directory)
+{
+    if (_recombRegistry.ready) return;
+
+    for (const auto& entry : recombLineFiles())
+    {
+        readRecombStab(directory + "/" + entry.filename, _recombRegistry.table[entry.lineIdx]);
+        _recombRegistry.loaded[entry.lineIdx] = true;
+    }
+    _recombRegistry.ready = true;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+bool GasLineEmission::recombinationTablesReady()
+{
+    return _recombRegistry.ready;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+double GasLineEmission::recombinationLineLuminosity(int lineIdx, double T, double ne, double nIon, double gammaHI,
+                                                    double nHI, double V_cm3)
+{
+    if (_recombRegistry.ready && _recombRegistry.loaded[lineIdx])
+    {
+        double eps = recombEmissivity(_recombRegistry.table[lineIdx], T, ne);
+        // eps [W m3] with cgs densities and volume: L [W] = eps * ne * nIon * V_cm3 * 1e6
+        return eps * ne * nIon * V_cm3 * 1e6;
+    }
+    // legacy branch: P_B form for H lines (Lyman-alpha always lands here); He lines are zero
+    if (lineIdx <= Bra) return hydrogenLineLuminosity(lineIdx, T, ne, gammaHI, nHI, V_cm3);
+    return 0.;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+namespace
+{
+    // legacy table path: precomputed q_col(T, ne) grids, used when the atomic data resources
+    // are unavailable
+    double tabulatedCollisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3)
+    {
+        double qcol = metalLineQcol(lineIdx, T, ne);
+        double lambda_m = GasLineEmission::lineWavelengths[lineIdx];
+        double hnu = h_SI * c_SI / lambda_m;
+        // L = h*nu * q_col * ne * nIon * V  [total luminosity in W]
+        return hnu * qcol * ne * nIon * V_cm3;
+    }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+namespace
+{
+    // ============== Level populations (statistical equilibrium) ==============
+
+    // reads the non-comment rows of a whitespace-separated text data file
+    std::vector<std::vector<double>> readDataFile(const std::string& path)
+    {
+        std::ifstream file(path);
+        if (!file.is_open()) throw std::runtime_error("Cannot open atomic data file: " + path);
+        std::vector<std::vector<double>> rows;
+        std::string line;
+        while (std::getline(file, line))
+        {
+            if (line.empty() || line[0] == '#') continue;
+            std::istringstream ss(line);
+            std::vector<double> row;
+            double v;
+            while (ss >> v) row.push_back(v);
+            if (!row.empty()) rows.push_back(row);
+        }
+        return rows;
+    }
+
+    // clamped log-log interpolation replicating NR::clampedValue<NR::interpolateLogLog>
+    double clampedLogLog(double x, const std::vector<double>& xv, const std::vector<double>& yv)
+    {
+        int n = static_cast<int>(xv.size());
+        if (x < xv[0]) return yv[0];
+        if (x >= xv[n - 1]) return yv[n - 1];
+        int i = static_cast<int>(std::upper_bound(xv.begin(), xv.end(), x) - xv.begin()) - 1;
+        double x1 = xv[i], x2 = xv[i + 1], f1 = yv[i], f2 = yv[i + 1];
+        if (f1 <= 0 || f2 <= 0)
+        {
+            if (x == x1) return f1;
+            if (x == x2) return f2;
+            return 0.;
+        }
+        return f1 * exp(log(x / x1) / log(x2 / x1) * (log(f2 / f1)));
+    }
+
+    // LU solve with row pivoting only on a zero diagonal; throws on a singular matrix or a
+    // non-finite solution
+    std::vector<double> solveMatrixEquationLU(std::vector<std::vector<double>>& matrix)
+    {
+        size_t size = matrix.size();
+        std::vector<double> solution(size);
+        for (size_t i = 0; i < size; i++) solution[i] = matrix[i][size];
+
+        for (size_t k = 0; k < size - 1; ++k)
+        {
+            if (matrix[k][k] == 0.0)
+            {
+                size_t maxRow = k;
+                double maxAbsVal = std::abs(matrix[k][k]);
+                for (size_t i = k + 1; i < size; ++i)
+                {
+                    double absVal = std::abs(matrix[i][k]);
+                    if (absVal > maxAbsVal)
+                    {
+                        maxAbsVal = absVal;
+                        maxRow = i;
+                    }
+                }
+                if (maxRow != k)
+                {
+                    std::swap(matrix[k], matrix[maxRow]);
+                    std::swap(solution[k], solution[maxRow]);
+                }
+                else
+                    throw std::runtime_error("Level population matrix is singular at row " + std::to_string(k));
+            }
+            for (size_t i = k + 1; i < size; ++i)
+            {
+                double inverse = matrix[i][k] / matrix[k][k];
+                for (size_t j = k + 1; j < size; ++j) matrix[i][j] -= inverse * matrix[k][j];
+                matrix[i][k] = inverse;
+            }
+        }
+        for (size_t i = 0; i < size; ++i)
+            for (size_t j = 0; j < i; ++j) solution[i] -= matrix[i][j] * solution[j];
+        for (int i = static_cast<int>(size) - 1; i >= 0; --i)
+        {
+            for (size_t j = i + 1; j < size; ++j) solution[i] -= matrix[i][j] * solution[j];
+            solution[i] /= matrix[i][i];
+            if (!std::isfinite(solution[i]))
+                throw std::runtime_error("Level population solution is not finite at index " + std::to_string(i));
+        }
+        return solution;
+    }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void GasLineEmission::loadAtomicModel(const std::string& directory, const std::string& speciesName,
+                                      const std::vector<std::string>& partnerNames, int maxNumLevels,
+                                      AtomicModel& model)
+{
+    model = AtomicModel();
+
+    // mass [amu -> kg]
+    model.mass = readDataFile(directory + "/" + speciesName + "_Mass.txt")[0][0] * Constants::amu();
+
+    // energy levels [cm^-1 -> J] and statistical weights, capped at maxNumLevels
+    for (const auto& row : readDataFile(directory + "/" + speciesName + "_Energy.txt"))
+    {
+        model.energy.push_back(row[0] * 100. * Constants::h() * Constants::c());
+        model.weight.push_back(row[1]);
+        if (static_cast<int>(model.energy.size()) == maxNumLevels) break;
+    }
+    int numLevels = model.numLevels();
+
+    // radiative transitions, dropping any that involve levels beyond the cap
+    for (const auto& row : readDataFile(directory + "/" + speciesName + "_Rad_Coeff.txt"))
+    {
+        int up = static_cast<int>(row[0]), low = static_cast<int>(row[1]);
+        if (up < numLevels && low < numLevels)
+        {
+            model.indexUpRad.push_back(up);
+            model.indexLowRad.push_back(low);
+            model.einsteinA.push_back(row[2]);
+        }
+    }
+    int numRad = model.numLines();
+
+    // derived per-line data: centers, Einstein B coefficients, branching ratios
+    model.center.resize(numRad);
+    model.einsteinBul.resize(numRad);
+    model.einsteinBlu.resize(numRad);
+    model.branchRatio.resize(numRad);
+    std::vector<double> sumA(numLevels, 0.);
+    for (int k = 0; k != numRad; ++k) sumA[model.indexUpRad[k]] += model.einsteinA[k];
+    for (int k = 0; k != numRad; ++k)
+    {
+        int up = model.indexUpRad[k], low = model.indexLowRad[k];
+        double lambda = Constants::h() * Constants::c() / (model.energy[up] - model.energy[low]);
+        model.center[k] = lambda;
+        model.einsteinBul[k] =
+            model.einsteinA[k] * pow(lambda, 5.) / (2. * Constants::h() * Constants::c() * Constants::c());
+        model.einsteinBlu[k] = model.einsteinBul[k] * model.weight[up] / model.weight[low];
+        model.branchRatio[k] = sumA[up] > 0. ? model.einsteinA[k] / sumA[up] : 0.;
+    }
+
+    // collisional transitions per partner [cm3/s -> m3/s]
+    for (const auto& pname : partnerNames)
+    {
+        AtomicModel::ColPartner partner;
+        partner.name = pname;
+        for (const auto& row : readDataFile(directory + "/" + speciesName + "_Col_" + pname + "_Temp.txt"))
+            partner.T.push_back(row[0]);
+        for (const auto& row : readDataFile(directory + "/" + speciesName + "_Col_" + pname + "_Coeff.txt"))
+        {
+            int up = static_cast<int>(row[0]), low = static_cast<int>(row[1]);
+            if (up < numLevels && low < numLevels)
+            {
+                partner.indexUpCol.push_back(up);
+                partner.indexLowCol.push_back(low);
+                std::vector<double> K(row.begin() + 2, row.end());
+                for (auto& v : K) v *= 1e-6;
+                partner.Kul.push_back(std::move(K));
+            }
+        }
+        model.colPartner.push_back(std::move(partner));
+    }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+std::vector<double> GasLineEmission::solveLevelPopulations(const AtomicModel& model, const Environment& env)
+{
+    int numLevels = model.numLevels();
+    std::vector<std::vector<double>> matrix(numLevels, std::vector<double>(numLevels + 1, 0.));
+
+    // radiative transitions: spontaneous emission always; pumping terms only if meanJ is provided
+    bool pumping = !env.meanJ.empty();
+    for (int k = 0; k != model.numLines(); ++k)
+    {
+        int up = model.indexUpRad[k], low = model.indexLowRad[k];
+        matrix[up][up] -= model.einsteinA[k];
+        matrix[low][up] += model.einsteinA[k];
+        if (pumping)
+        {
+            double J = env.meanJ[k];
+            matrix[up][up] -= model.einsteinBul[k] * J;
+            matrix[low][up] += model.einsteinBul[k] * J;
+            matrix[low][low] -= model.einsteinBlu[k] * J;
+            matrix[up][low] += model.einsteinBlu[k] * J;
+        }
+    }
+
+    // collisional transitions; Kul, Klu and the partner density are floored to keep the matrix regular
+    double T = env.Tkin;
+    for (size_t c = 0; c != model.colPartner.size(); ++c)
+    {
+        const auto& partner = model.colPartner[c];
+        double Tmin = partner.T.front(), Tmax = partner.T.back();
+        for (size_t t = 0; t != partner.indexUpCol.size(); ++t)
+        {
+            int up = partner.indexUpCol[t], low = partner.indexLowCol[t];
+            double weightRatio = model.weight[up] / model.weight[low];
+            double energyDiff = model.energy[up] - model.energy[low];
+            double Kconversion = std::max(weightRatio * exp(-energyDiff / Constants::k() / T), 1e-15);
+            double Trep = std::max(Tmin, std::min(T, Tmax));
+            double Kul = clampedLogLog(Trep, partner.T, partner.Kul[t]);
+            double Klu = Kul * Kconversion;
+            if (Kul <= 0.)
+            {
+                if (env.warn)
+                    env.warn("collisional rate Kul <= 0 for partner " + partner.name + " transition ("
+                             + std::to_string(up) + "-" + std::to_string(low) + "); flooring to 1e-20");
+                Kul = 1.0e-20;
+            }
+            if (Klu <= 0.)
+            {
+                if (env.warn)
+                    env.warn("collisional rate Klu <= 0 for partner " + partner.name + " transition ("
+                             + std::to_string(up) + "-" + std::to_string(low) + "); flooring to 1e-20*Kul");
+                Klu = 1.0e-20 * Kul;
+            }
+            double n = std::max(env.nPartner[c], 1.0e-20);
+            matrix[up][up] -= Kul * n;
+            matrix[low][low] -= Klu * n;
+            matrix[up][low] += Klu * n;
+            matrix[low][up] += Kul * n;
+        }
+    }
+
+    // replace the last row by the number density normalization and solve
+    for (int p = 0; p != numLevels; ++p) matrix[numLevels - 1][p] = 1.;
+    matrix[numLevels - 1][numLevels] = env.nTotal;
+    return solveMatrixEquationLU(matrix);
+}
+
+//////////////////////////////////////////////////////////////////////
+
+std::vector<double> GasLineEmission::lineEmissivities(const AtomicModel& model, const std::vector<double>& pops)
+{
+    std::vector<double> eps(model.numLines());
+    for (int k = 0; k != model.numLines(); ++k)
+        eps[k] = Constants::h() * Constants::c() / model.center[k] * model.einsteinA[k] * pops[model.indexUpRad[k]];
+    return eps;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+namespace
+{
+    // maps the built-in collisional lines to loaded atomic models and transitions;
+    // filled once at setup by initializeAtomicModels(), read-only afterwards
+    struct AtomicLineRegistry
+    {
+        bool ready = false;
+        std::vector<GasLineEmission::AtomicModel> models;  // one per carrier species
+        std::vector<std::string> modelNames;               // species name per model slot
+        std::vector<int> lineModel =                       // model slot per line, -1 = no atomic model
+            std::vector<int>(GasLineEmission::numLines, -1);
+        std::vector<int> lineTransition =  // transition index within the model
+            std::vector<int>(GasLineEmission::numLines, -1);
+    };
+    AtomicLineRegistry _atomicRegistry;
+
+    double solvedCollisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3)
+    {
+        const auto& model = _atomicRegistry.models[_atomicRegistry.lineModel[lineIdx]];
+        GasLineEmission::Environment env;
+        env.Tkin = T;
+        env.nTotal = nIon * 1e6;    // cm^-3 -> m^-3
+        env.nPartner = {ne * 1e6};  // cm^-3 -> m^-3
+        auto pops = GasLineEmission::solveLevelPopulations(model, env);
+        auto eps = GasLineEmission::lineEmissivities(model, pops);
+        return eps[_atomicRegistry.lineTransition[lineIdx]] * V_cm3 * 1e-6;  // W m^-3 x V [m^3] = W
+    }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void GasLineEmission::initializeAtomicModels(const std::string& directory)
+{
+    if (_atomicRegistry.ready) return;
+
+    // carrier species and the lines they serve (LineIndex values)
+    struct SpeciesLines
+    {
+        const char* name;
+        std::vector<int> lines;
+    };
+    std::vector<SpeciesLines> table = {{"N_II", {NII6548, NII6583}},
+                                       {"O_I", {OI6300, OI6364}},
+                                       {"O_II", {OII3729, OII3726}},
+                                       {"O_III", {OIII4363, OIII4959, OIII5007}},
+                                       {"S_II", {SII6716, SII6731}}};
+
+    for (int k = 0; k != numLines; ++k)
+    {
+        _atomicRegistry.lineModel[k] = -1;
+        _atomicRegistry.lineTransition[k] = -1;
+    }
+    for (const auto& entry : table)
+    {
+        AtomicModel model;
+        loadAtomicModel(directory, entry.name, {"e-"}, 20, model);
+        int slot = static_cast<int>(_atomicRegistry.models.size());
+        _atomicRegistry.models.push_back(std::move(model));
+        _atomicRegistry.modelNames.push_back(entry.name);
+        const auto& m = _atomicRegistry.models[slot];
+        for (int lineIdx : entry.lines)
+        {
+            // map the line to the nearest-wavelength transition of its carrier
+            double target = lineWavelengths[lineIdx];
+            int kbest = -1;
+            double dbest = std::numeric_limits<double>::infinity();
+            for (int k = 0; k != m.numLines(); ++k)
+            {
+                double d = std::abs(m.center[k] - target);
+                if (d < dbest)
+                {
+                    dbest = d;
+                    kbest = k;
+                }
+            }
+            _atomicRegistry.lineModel[lineIdx] = slot;
+            _atomicRegistry.lineTransition[lineIdx] = kbest;
+        }
+    }
+    _atomicRegistry.ready = true;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+bool GasLineEmission::atomicModelsReady()
+{
+    return _atomicRegistry.ready;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+int GasLineEmission::lineModelSlot(int lineIdx)
+{
+    if (!_atomicRegistry.ready || lineIdx < 0 || lineIdx >= static_cast<int>(_atomicRegistry.lineModel.size()))
+        return -1;
+    return _atomicRegistry.lineModel[lineIdx];
+}
+
+//////////////////////////////////////////////////////////////////////
+
+int GasLineEmission::lineTransition(int lineIdx)
+{
+    if (!_atomicRegistry.ready || lineIdx < 0 || lineIdx >= static_cast<int>(_atomicRegistry.lineTransition.size()))
+        return -1;
+    return _atomicRegistry.lineTransition[lineIdx];
+}
+
+//////////////////////////////////////////////////////////////////////
+
+const GasLineEmission::AtomicModel& GasLineEmission::atomicModel(int slot)
+{
+    return _atomicRegistry.models[slot];
+}
+
+//////////////////////////////////////////////////////////////////////
+
+double GasLineEmission::collisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3)
+{
+    if (_atomicRegistry.ready && _atomicRegistry.lineModel[lineIdx] >= 0)
+        return solvedCollisionalLineLuminosity(lineIdx, T, ne, nIon, V_cm3);
+    return tabulatedCollisionalLineLuminosity(lineIdx, T, ne, nIon, V_cm3);
+}
+
+//////////////////////////////////////////////////////////////////////
+
+namespace
+{
+    // one Case B recombination table set for the extended inventory: the wavelength index
+    // file, the stab file name prefix (the label is the truncated wavelength in A), and the
+    // line family
+    struct RecombSet
+    {
+        const char* indexFile;
+        const char* prefix;
+        bool isHeI;
+        bool isHeII;
+        double mass;
+    };
+    constexpr double _protonMass = 1.67262192e-27;
+    const RecombSet _recombSets[] = {{"HI_wavelengths.txt", "HI_CaseB_", false, false, _protonMass},
+                                     {"HeI_wavelengths.txt", "HeI_CaseB_", true, false, 4.0 * _protonMass},
+                                     {"HeII_wavelengths.txt", "HeII_CaseB_", false, true, 4.0 * _protonMass}};
+}
+
+//////////////////////////////////////////////////////////////////////
+
+int GasLineEmission::extendLineRegistry(const std::string& recombDirectory, const std::string& atomicDirectory,
+                                        const std::vector<SpeciesSpec>& species)
+{
+    auto& registry = mutableLineRegistry();
+    if (!_recombRegistry.ready || !_atomicRegistry.ready)
+        throw std::runtime_error("Extending the line registry requires the recombination tables and solver models");
+    if (static_cast<int>(registry.size()) > numLines) return 0;
+
+    // file names already claimed by the built-in recombination lines
+    std::set<std::string> claimedFiles;
+    for (const auto& entry : recombLineFiles()) claimedFiles.insert(entry.filename);
+
+    // (model slot, transition) pairs already claimed by the built-in collisional lines
+    std::set<std::pair<int, int>> claimedTransitions;
+    for (int k = 0; k != numLines; ++k)
+        if (_atomicRegistry.lineModel[k] >= 0)
+            claimedTransitions.insert({_atomicRegistry.lineModel[k], _atomicRegistry.lineTransition[k]});
+
+    int numAdded = 0;
+
+    // recombination inventory: every table enumerated by the per-set wavelength index files
+    for (const auto& set : _recombSets)
+    {
+        std::ifstream index(recombDirectory + "/" + set.indexFile);
+        if (!index.is_open())
+            throw std::runtime_error(std::string("Cannot open recombination index file: ") + set.indexFile);
+        double wavelengthA;
+        while (index >> wavelengthA)
+        {
+            std::string filename = set.prefix + std::to_string(static_cast<long long>(wavelengthA)) + "A_line.stab";
+            if (!claimedFiles.insert(filename).second) continue;
+
+            RecombTable table;
+            readRecombStab(recombDirectory + "/" + filename, table);
+            registry.push_back({wavelengthA * 1e-10, set.mass, -1, -1, set.isHeI, set.isHeII});
+            _recombRegistry.table.push_back(std::move(table));
+            _recombRegistry.loaded.push_back(true);
+            _atomicRegistry.lineModel.push_back(-1);
+            _atomicRegistry.lineTransition.push_back(-1);
+            ++numAdded;
+        }
+    }
+
+    // collisional lines: every transition of every loadable species
+    for (const auto& spec : species)
+    {
+        int slot = -1;
+        for (int m = 0; m != static_cast<int>(_atomicRegistry.modelNames.size()); ++m)
+            if (_atomicRegistry.modelNames[m] == spec.name) slot = m;
+        if (slot < 0)
+        {
+            AtomicModel model;
+            try
+            {
+                loadAtomicModel(atomicDirectory, spec.name, {"e-"}, 20, model);
+            }
+            catch (const std::runtime_error&)
+            {
+                continue;
+            }
+            slot = static_cast<int>(_atomicRegistry.models.size());
+            _atomicRegistry.models.push_back(std::move(model));
+            _atomicRegistry.modelNames.push_back(spec.name);
+        }
+        const auto& m = _atomicRegistry.models[slot];
+        for (int t = 0; t != m.numLines(); ++t)
+        {
+            if (claimedTransitions.count({slot, t})) continue;
+            registry.push_back({m.center[t], m.mass, spec.carrierIonIndex, spec.elementIndex, false, false});
+            _recombRegistry.table.push_back({});
+            _recombRegistry.loaded.push_back(false);
+            _atomicRegistry.lineModel.push_back(slot);
+            _atomicRegistry.lineTransition.push_back(t);
+            ++numAdded;
+        }
+    }
+    return numAdded;
 }
 
 //////////////////////////////////////////////////////////////////////
