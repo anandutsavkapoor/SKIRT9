@@ -50,9 +50,10 @@
       C, N, O, Ne, Mg, Si, S, Fe) and the electron density. Key ion fractions (x_HII, x_NII,
       x_OI, x_OII, x_OIII, x_SII) and n_e are stored as custom state variables for diagnostics.
     - <b>Emission</b> is computed from the converged radiation field, temperature, and ion fractions:
-      NebularLineEmission computes line luminosities (hydrogen recombination lines from
-      Storey & Hummer 1995 Case B coefficients; metal forbidden lines from CHIANTI collisional
-      excitation rates) and NebularContinuumEmission computes the nebular continuum (free-bound,
+      GasLineEmission computes the line luminosities: H and He recombination lines from Case B
+      emissivity tables, with the Storey & Hummer 1995 P_B form for H as fallback; collisional
+      lines from the statistical-equilibrium solver on the atomic data, with precomputed CHIANTI
+      q_col tables as fallback. GasContinuumEmission computes the nebular continuum (free-bound,
       free-free, two-photon).
     - <b>Diffuse reemission</b> of absorbed ionizing photons follows Wood, Mathis & Ercolano (2004),
       with pre-tabulated temperature-dependent spectra for H/He Lyman continuum and He two-photon.
@@ -249,6 +250,26 @@ class DiffuseIonizedGasMix : public EmittingGasMix
         PROPERTY_DOUBLE(maxHydrogenDensity, "maximum hydrogen number density ceiling in cm^-3 (0 means no ceiling)")
         ATTRIBUTE_MIN_VALUE(maxHydrogenDensity, "[0")
         ATTRIBUTE_DEFAULT_VALUE(maxHydrogenDensity, "100000")
+
+        PROPERTY_DOUBLE(maxEmissionWavelength, "the upper limit of the gas emission wavelength grid")
+        ATTRIBUTE_QUANTITY(maxEmissionWavelength, "wavelength")
+        ATTRIBUTE_MIN_VALUE(maxEmissionWavelength, "1 micron")
+        ATTRIBUTE_MAX_VALUE(maxEmissionWavelength, "1 m")
+        ATTRIBUTE_DEFAULT_VALUE(maxEmissionWavelength, "1000 micron")
+        ATTRIBUTE_DISPLAYED_IF(maxEmissionWavelength, "Level3")
+
+        PROPERTY_INT(numEmissionWavelengths, "the number of bins in the gas emission wavelength grid")
+        ATTRIBUTE_MIN_VALUE(numEmissionWavelengths, "50")
+        ATTRIBUTE_MAX_VALUE(numEmissionWavelengths, "2000")
+        ATTRIBUTE_DEFAULT_VALUE(numEmissionWavelengths, "250")
+        ATTRIBUTE_DISPLAYED_IF(numEmissionWavelengths, "Level3")
+
+        PROPERTY_DOUBLE(lineLuminosityFloor, "the relative luminosity floor for extended-inventory lines "
+                                             "(fraction of the brightest line in the cell; 0 keeps all lines)")
+        ATTRIBUTE_MIN_VALUE(lineLuminosityFloor, "[0")
+        ATTRIBUTE_MAX_VALUE(lineLuminosityFloor, "1]")
+        ATTRIBUTE_DEFAULT_VALUE(lineLuminosityFloor, "0")
+        ATTRIBUTE_DISPLAYED_IF(lineLuminosityFloor, "Level3")
 
     ITEM_END()
 
@@ -540,6 +561,16 @@ private:
     int _numLines = 0;
     Array _lineCenters;
     Array _lineMasses;
+    // registry indices of the lines this mix emits: all built-in lines plus the
+    // extended-inventory lines that fall inside the emission wavelength grid
+    std::vector<int> _activeLines;
+    // solve groups: active-line indices per atomic-model slot (one level-population solve per
+    // group per cell), with each line's transition index; lines without a model use the
+    // per-line path
+    std::vector<int> _groupSlots;
+    std::vector<std::vector<int>> _groupLines;
+    std::vector<int> _lineTransitions;
+    std::vector<int> _lineGroup;  // group index per active line, -1 = per-line path
 
     // Convergence stability tracking
     mutable std::vector<double> _convergedFractionHistory;

@@ -8,11 +8,12 @@
 #include "Constants.hpp"
 #include "DisjointWavelengthGrid.hpp"
 #include "FatalError.hpp"
+#include "FilePaths.hpp"
+#include "GasContinuumEmission.hpp"
+#include "GasLineEmission.hpp"
 #include "Log.hpp"
 #include "MaterialState.hpp"
 #include "MediumSystem.hpp"
-#include "NebularContinuumEmission.hpp"
-#include "NebularLineEmission.hpp"
 #include "PhotonPacket.hpp"
 #include "Random.hpp"
 #include "SnapshotParameter.hpp"
@@ -291,7 +292,8 @@ void DiffuseIonizedGasMix::setupSelfBefore()
     _lambdaLow = rydbergToWavelength(1.0) + 1e-10;   // just above 1 Ryd (912 A)
     _lambdaHigh = rydbergToWavelength(6.0) - 2e-10;  // just below 6 Ryd (152 A)
 
-    // Build emission wavelength grid for nebular continuum (log-spaced, 900 A to 10 micron)
+    // Build the gas emission wavelength grid (log-spaced from 900 A): continuum sampling
+    // range and the window for extended-inventory lines
     {
         class CustomWavelengthGrid : public DisjointWavelengthGrid
         {
@@ -307,9 +309,9 @@ void DiffuseIonizedGasMix::setupSelfBefore()
             Array _wl;
         };
 
-        constexpr int numEmBins = 200;
+        const int numEmBins = numEmissionWavelengths();
         constexpr double lamMin = 9.0e-8;  // 900 A [m]
-        constexpr double lamMax = 1.0e-5;  // 10 micron [m]
+        const double lamMax = maxEmissionWavelength();
         Array emLambdav(numEmBins);
         double logMin = std::log10(lamMin);
         double logMax = std::log10(lamMax);
@@ -343,14 +345,114 @@ void DiffuseIonizedGasMix::setupSelfBefore()
         rfDlambdav = rfWavelengthGrid->dlambdav();
         _emissionSolver.initialize(rfLambdav, rfDlambdav);
 
-        // Set up line emission data from NebularLineEmission
-        _numLines = NebularLineEmission::numLines;
+        // use the statistical-equilibrium solver for the collisional lines when the atomic data
+        // resources are available; otherwise the precomputed q_col tables
+        try
+        {
+            string path = FilePaths::resource("O_III_Energy.txt");
+            GasLineEmission::initializeAtomicModels(path.substr(0, path.find_last_of('/')));
+            find<Log>()->info("Collisional line emission uses the statistical-equilibrium solver");
+        }
+        catch (const FatalError&)
+        {
+            find<Log>()->warning("Atomic data resources not found; collisional line emission uses the "
+                                 "precomputed q_col tables");
+        }
+
+        // use the Case B emissivity tables for the H and He recombination lines when the
+        // resources are available; otherwise the H lines use the legacy P_B form and the He
+        // lines are zero
+        try
+        {
+            string path = FilePaths::resource("HI_CaseB_6564A_line.stab");
+            GasLineEmission::initializeRecombinationTables(path.substr(0, path.find_last_of('/')));
+            find<Log>()->info("Recombination line emission uses the Case B emissivity tables");
+        }
+        catch (const FatalError&)
+        {
+            find<Log>()->warning("Recombination table resources not found; H lines use the "
+                                 "legacy P_B form and He lines are disabled");
+        }
+        catch (const std::exception& e)
+        {
+            find<Log>()->warning(string("Recombination tables could not be loaded (") + e.what()
+                                 + "); H lines use the legacy P_B form and He lines are disabled");
+        }
+
+        // append the extended inventory to the line registry when both resource families
+        // are available
+        if (GasLineEmission::recombinationTablesReady() && GasLineEmission::atomicModelsReady())
+        {
+            try
+            {
+                static const char* romans[] = {"I", "II", "III", "IV",   "V",   "VI", "VII", "VIII", "IX",
+                                               "X", "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII"};
+                static const char* metals[] = {"C", "N", "O", "Ne", "Mg", "Si", "S", "Fe"};
+                std::vector<GasLineEmission::SpeciesSpec> species;
+                for (int e = 0; e != 8; ++e)
+                {
+                    int elem = e + 2;
+                    for (int s = 1; s <= PhotoIonizationSolver::numStages[elem]; ++s)
+                        species.push_back({string(metals[e]) + "_" + romans[s - 1],
+                                           PhotoIonizationSolver::stageOffset[elem] + s - 1, e});
+                }
+                string recombDir = FilePaths::resource("HI_wavelengths.txt");
+                recombDir = recombDir.substr(0, recombDir.find_last_of('/'));
+                string atomicDir = FilePaths::resource("O_III_Energy.txt");
+                atomicDir = atomicDir.substr(0, atomicDir.find_last_of('/'));
+                int numAdded = GasLineEmission::extendLineRegistry(recombDir, atomicDir, species);
+                find<Log>()->info("Added " + std::to_string(numAdded) + " lines to the line registry");
+            }
+            catch (const FatalError&)
+            {
+                find<Log>()->warning("Line registry extension resources not found; using the built-in lines");
+            }
+            catch (const std::exception& e)
+            {
+                find<Log>()->warning(string("Line registry extension could not be loaded (") + e.what()
+                                     + "); using the built-in lines");
+            }
+        }
+
+        // select the active lines from the registry (see _activeLines)
+        const auto& registry = GasLineEmission::lineRegistry();
+        const Array& emLambdav = _emissionWavelengthGrid->lambdav();
+        double emLambdaMin = emLambdav[0];
+        double emLambdaMax = emLambdav[emLambdav.size() - 1];
+        _activeLines.clear();
+        for (int k = 0; k != static_cast<int>(registry.size()); ++k)
+        {
+            if (k < GasLineEmission::numLines
+                || (registry[k].wavelength >= emLambdaMin && registry[k].wavelength <= emLambdaMax))
+                _activeLines.push_back(k);
+        }
+        _numLines = static_cast<int>(_activeLines.size());
         _lineCenters.resize(_numLines);
         _lineMasses.resize(_numLines);
-        for (int k = 0; k < _numLines; k++)
+        for (int i = 0; i < _numLines; i++)
         {
-            _lineCenters[k] = NebularLineEmission::lineWavelengths[k];
-            _lineMasses[k] = NebularLineEmission::lineMasses[k];
+            _lineCenters[i] = registry[_activeLines[i]].wavelength;
+            _lineMasses[i] = registry[_activeLines[i]].mass;
+        }
+
+        // group the collisional lines by atomic model so each species is solved once per cell
+        _lineTransitions.assign(_numLines, -1);
+        _lineGroup.assign(_numLines, -1);
+        for (int i = 0; i < _numLines; ++i)
+        {
+            int slot = GasLineEmission::lineModelSlot(_activeLines[i]);
+            if (slot < 0) continue;
+            _lineTransitions[i] = GasLineEmission::lineTransition(_activeLines[i]);
+            auto it = std::find(_groupSlots.begin(), _groupSlots.end(), slot);
+            if (it == _groupSlots.end())
+            {
+                _groupSlots.push_back(slot);
+                _groupLines.emplace_back();
+                it = _groupSlots.end() - 1;
+            }
+            int g = it - _groupSlots.begin();
+            _groupLines[g].push_back(i);
+            _lineGroup[i] = g;
         }
     }
 
@@ -1176,7 +1278,7 @@ Array DiffuseIonizedGasMix::emissionSpectrum(const MaterialState* state, const A
     const Array& lambdav = _emissionWavelengthGrid->lambdav();
     for (int i = 0; i < numWavelengths; i++)
     {
-        emission[i] = NebularContinuumEmission::continuumLuminosity(lambdav[i], T, ne, nHII, nHeII, nHeIII, V_cm3);
+        emission[i] = GasContinuumEmission::continuumLuminosity(lambdav[i], T, ne, nHII, nHeII, nHeIII, V_cm3);
     }
 
     return emission;
@@ -1213,30 +1315,60 @@ Array DiffuseIonizedGasMix::lineEmissionSpectrum(const MaterialState* state, con
 
     double nHI = nH * result.ionFracs[0];
 
-    // H recombination lines, photon-conserving form:
-    //   L = P_B(T, ne) * Gamma_HI * n_HI * V * h*nu_line
-    // Uses the same Jv the solver was called with, so Gamma_HI is consistent with the
-    // ion fractions just computed.
+    // recombining ion densities [cm^-3] for the recombination lines
+    double nHII = nH * result.ionFracs[1];
+    double nHeII = nH * yHe * result.ionFracs[PhotoIonizationSolver::stageOffset[1] + 1];
+    double nHeIII = nH * yHe * result.ionFracs[PhotoIonizationSolver::stageOffset[1] + 2];
+
+    // Gamma_HI for the legacy P_B path, from the same Jv the solver was called with so that it
+    // is consistent with the ion fractions just computed
     double gamma[PhotoIonizationSolver::totalStages];
     _emissionSolver.computePhotoionizationRates(Jv, gamma);
     double gammaHI = gamma[0];
-    for (int k = NebularLineEmission::LineIndex::Lya; k <= NebularLineEmission::LineIndex::Bra; ++k)
+    const auto& registry = GasLineEmission::lineRegistry();
+
+    // collisional lines served by an atomic model: one level-population solve per species,
+    // in the nebular limit (electron collisions at T and ne, no radiative pumping)
+    for (size_t g = 0; g != _groupSlots.size(); ++g)
     {
-        luminosities[k] = NebularLineEmission::hydrogenLineLuminosity(k, T, ne, gammaHI, nHI, V_cm3);
+        const auto& line = registry[_activeLines[_groupLines[g].front()]];
+        double nIon = nH * metalAbundances[line.elementIndex] * result.ionFracs[line.carrierIonIndex];
+        GasLineEmission::Environment env;
+        env.Tkin = T;
+        env.nTotal = nIon * 1e6;    // cm^-3 -> m^-3
+        env.nPartner = {ne * 1e6};  // cm^-3 -> m^-3
+        auto pops = GasLineEmission::solveLevelPopulations(GasLineEmission::atomicModel(_groupSlots[g]), env);
+        auto eps = GasLineEmission::lineEmissivities(GasLineEmission::atomicModel(_groupSlots[g]), pops);
+        for (int i : _groupLines[g]) luminosities[i] = eps[_lineTransitions[i]] * V_cm3 * 1e-6;  // W m^-3 x m^3
     }
 
-    // Metal forbidden lines
-    for (int k = NebularLineEmission::LineIndex::NII6548; k < NebularLineEmission::numLines; ++k)
+    // remaining lines: recombination lines (Case B tables, legacy P_B fallback for H) and
+    // collisional lines on the legacy table path
+    for (int i = 0; i < _numLines; ++i)
     {
-        int ionIdx = NebularLineEmission::lineCarrierIonIndex[k];
-        int elemIdx = NebularLineEmission::lineElementIndex[k];
-        if (ionIdx < 0 || elemIdx < 0) continue;
+        if (_lineGroup[i] >= 0) continue;
+        int k = _activeLines[i];
+        const auto& line = registry[k];
+        if (line.carrierIonIndex >= 0)
+        {
+            double nIon = nH * metalAbundances[line.elementIndex] * result.ionFracs[line.carrierIonIndex];
+            luminosities[i] = GasLineEmission::collisionalLineLuminosity(k, T, ne, nIon, V_cm3);
+        }
+        else
+        {
+            double nIon = line.isHeIRecomb ? nHeII : (line.isHeIIRecomb ? nHeIII : nHII);
+            luminosities[i] = GasLineEmission::recombinationLineLuminosity(k, T, ne, nIon, gammaHI, nHI, V_cm3);
+        }
+    }
 
-        double abundance = metalAbundances[elemIdx];
-        double xIon = result.ionFracs[ionIdx];
-        double nIon = nH * abundance * xIon;
-
-        luminosities[k] = NebularLineEmission::metalLineLuminosity(k, T, ne, nIon, V_cm3);
+    // optional per-cell relative floor on the extended-inventory lines
+    if (lineLuminosityFloor() > 0.)
+    {
+        double Lmax = 0.;
+        for (int i = 0; i < _numLines; ++i) Lmax = max(Lmax, luminosities[i]);
+        double floor = lineLuminosityFloor() * Lmax;
+        for (int i = 0; i < _numLines; ++i)
+            if (_activeLines[i] >= GasLineEmission::numLines && luminosities[i] < floor) luminosities[i] = 0.;
     }
 
     return luminosities;
@@ -1739,11 +1871,8 @@ const DiffuseIonizedGasMix::ReemissionData& DiffuseIonizedGasMix::getReemissionD
 void DiffuseIonizedGasMix::calculate5BinRatioParameters(const Array& Jv, double& logR2, double& logR3, double& logR4,
                                                         double& logR5) const
 {
-    /**
-     * Calculate 5-bin ratio parameters R2, R3, R4, and R5 from radiation field.
-     * R2 = <J2>/<J1>, R3 = <J3>/<J1>, R4 = <J4>/<J1>, R5 = <J5>/<J1>
-     * where <Ji> is the average intensity in bin i.
-     */
+    // 5-bin ratio parameters from the radiation field: R_i = J_i / J_1 for i = 2..5,
+    // with J_i the average intensity in bin i
 
     // Initialize ratios to the sentinel value; STAB will clamp valid ratios into bounds.
     logR2 = _logFloor;
