@@ -7,6 +7,7 @@
 #define NONLTELINEGASMIX_H
 
 #include "EmittingGasMix.hpp"
+#include "GasLineEmission.hpp"
 
 ////////////////////////////////////////////////////////////////////
 
@@ -546,8 +547,9 @@ private:
         vector<int> indexLowCol;  // the lower energy level index for each collisional transition
         vector<Array> Kul;        // the coefficient for each collisional transition and for each temperature
     };
-    int _numColPartners{0};          // the number of collisional interaction partners -- index c
-    vector<ColPartner> _colPartner;  // the data for each collisional partner
+    int _numColPartners{0};               // the number of collisional interaction partners -- index c
+    vector<ColPartner> _colPartner;       // the data for each collisional partner
+    GasLineEmission::AtomicModel _model;  // the same data in the shared level-population solver's layout
 
     // the radiation field wavelength grid for this simulation
     int _numWavelengths{0};  // the number of wavelength bins -- index ell

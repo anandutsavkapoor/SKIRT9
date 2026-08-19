@@ -141,6 +141,27 @@ void NonLTELineGasMix::setupSelfBefore()
     }
     _numColPartners = colNames.size();
 
+    // copy the atomic data into the layout used by the shared level-population solver
+    _model.mass = _mass;
+    _model.energy = _energy;
+    _model.weight = _weight;
+    _model.indexUpRad = _indexUpRad;
+    _model.indexLowRad = _indexLowRad;
+    _model.einsteinA = _einsteinA;
+    _model.einsteinBul = _einsteinBul;
+    _model.einsteinBlu = _einsteinBlu;
+    _model.center.assign(begin(_center), end(_center));
+    for (const auto& partner : _colPartner)
+    {
+        _model.colPartner.emplace_back();
+        auto& mp = _model.colPartner.back();
+        mp.name = partner.name;
+        mp.T.assign(begin(partner.T), end(partner.T));
+        mp.indexUpCol = partner.indexUpCol;
+        mp.indexLowCol = partner.indexLowCol;
+        for (const auto& coeff : partner.Kul) mp.Kul.emplace_back(begin(coeff), end(coeff));
+    }
+
     // log summary info on the radiative lines
     auto log = find<Log>();
     auto units = find<Units>();
@@ -327,53 +348,6 @@ void NonLTELineGasMix::initializeSpecificState(MaterialState* state, double /*me
 
 namespace
 {
-    // solve the square set of linear equations represented by the given matrix using LU decomposition
-    // the matrix should have N rows and N+1 columns; its contents is overwritten and
-    // the solution is returned as an array of size N
-    Array solveMatrixEquation(vector<vector<double>>& matrix)
-    {
-        size_t size = matrix.size();
-        Array solution(size);
-
-        // forwarding elimination
-        for (size_t i = 0; i < size; i++) solution[i] = matrix[i][size];
-
-        // decomposition
-        for (size_t k = 0; k < size - 1; ++k)
-        {
-            if (matrix[k][k] == 0.0)
-            {
-                std::swap(matrix[k], matrix[k + 1]);
-                std::swap(solution[k], solution[k + 1]);
-            }
-            for (size_t i = k + 1; i < size; ++i)
-            {
-                double inverse = matrix[i][k] / matrix[k][k];
-                for (size_t j = k + 1; j < size; ++j) matrix[i][j] -= inverse * matrix[k][j];
-                matrix[i][k] = inverse;
-            }
-        }
-
-        // forwarding elimination
-        for (size_t i = 0; i < size; ++i)
-            for (size_t j = 0; j < i; ++j) solution[i] -= matrix[i][j] * solution[j];
-
-        // backward substitution
-        for (int i = static_cast<int>(size) - 1; i >= 0; --i)
-        {
-            for (size_t j = i + 1; j < size; ++j) solution[i] -= matrix[i][j] * solution[j];
-            solution[i] /= matrix[i][i];
-        }
-
-        // return the solution
-        return solution;
-    }
-}
-
-////////////////////////////////////////////////////////////////////
-
-namespace
-{
     // return the dispersion of a line profile in wavelength space
     // given the line center, the effective gas temperature, and the species mass
     double sigmaForLine(double center, double temperature, double mass)
@@ -410,23 +384,25 @@ UpdateStatus NonLTELineGasMix::updateSpecificState(MaterialState* state, const A
     // if the cell does not contain any material for this component, leave all properties untouched
     if (state->numberDensity() > 0)
     {
-        // allocate the statistical equilibrium matrix for the level populations
-        vector<vector<double>> matrix(_numLevels, vector<double>(_numLevels + 1));
+        // gather the per-cell inputs for the shared level-population solver
+        GasLineEmission::Environment env;
+        env.Tkin = state->kineticTemperature();
+        env.nTotal = state->numberDensity();
+        env.nPartner.resize(_numColPartners);
+        for (int c = 0; c != _numColPartners; ++c) env.nPartner[c] = state->colPartnerDensity(c);
+        env.meanJ.resize(_numLines);
+        {
+            auto log = find<Log>();
+            env.warn = [log](const std::string& message) { log->warning(message); };
+        }
 
-        // add the terms for the radiational transitions
+        // calculate the mean intensity of the radiation field convolved over the normalized line profile g
+        // for each radiative transition:
+        //   J_convolved = \int J_lambda(lambda) g(lambda) d lambda  /  \int g(lambda) d lambda
+        // all wavelength points within a given range around the line center are used, and the grid is
+        // verified to be fine enough to reproduce the normalization 1 = \int g(lambda) d lambda
         for (int k = 0; k != _numLines; ++k)
         {
-            int up = _indexUpRad[k];
-            int low = _indexLowRad[k];
-
-            // add the Einstein Aul coefficients (spontaneous emission)
-            matrix[up][up] -= _einsteinA[k];
-            matrix[low][up] += _einsteinA[k];
-
-            // calculate the mean intensity of the radiation field convolved over the normalized line profile g:
-            //   J_convolved = \int J_lambda(lambda) g(lambda) d lambda  /  \int g(lambda) d lambda
-            // we use all wavelength points within a given range around the line center and verify that the
-            // grid is sufficiently resolved to reproduce the normalizaton value of 1 = \int g(lambda) d lambda
             double center = _center[k];
             double sigma = sigmaForLine(center, state->temperature(), _mass);
             double lambdamin = center - PROFILE_RANGE * sigma;
@@ -466,50 +442,19 @@ UpdateStatus NonLTELineGasMix::updateSpecificState(MaterialState* state, const A
             }
             double J = Jsum / gsum;
             if (storeMeanIntensities()) state->setMeanIntensity(k, J);
-
-            // add the Einstein Bul coefficients (stimulated emission)
-            matrix[up][up] -= _einsteinBul[k] * J;
-            matrix[low][up] += _einsteinBul[k] * J;
-
-            // add the Einstein Blu coefficients (absorption)
-            matrix[low][low] -= _einsteinBlu[k] * J;
-            matrix[up][low] += _einsteinBlu[k] * J;
+            env.meanJ[k] = J;
         }
 
-        // add the terms for the collisional transitions
-        double T = state->kineticTemperature();
-        for (int c = 0; c != _numColPartners; ++c)
+        // solve the statistical equilibrium equations with the shared solver
+        std::vector<double> solution;
+        try
         {
-            const auto& partner = _colPartner[c];
-
-            for (int t = 0; t != partner.numColTrans; ++t)
-            {
-                int up = partner.indexUpCol[t];
-                int low = partner.indexLowCol[t];
-                double weightRatio = _weight[up] / _weight[low];
-                double energyDiff = _energy[up] - _energy[low];
-                double Kconversion = weightRatio * exp(-energyDiff / Constants::k() / T);
-                // determine Kul by interpolation from the temperature-dependent table
-                double Kul = NR::clampedValue<NR::interpolateLogLog>(T, partner.T, partner.Kul[t]);
-
-                // determine Klu from Kul
-                double Klu = Kul * Kconversion;
-
-                // add the coefficients after multiplication by the partner number density
-                double n = state->colPartnerDensity(c);
-                matrix[up][up] -= Kul * n;
-                matrix[low][low] -= Klu * n;
-                matrix[up][low] += Klu * n;
-                matrix[low][up] += Kul * n;
-            }
+            solution = GasLineEmission::solveLevelPopulations(_model, env);
         }
-
-        // replace the last row of the matrix by the normalization of the number density
-        for (int p = 0; p != _numLevels; ++p) matrix[_numLevels - 1][p] = 1.;
-        matrix[_numLevels - 1][_numLevels] = state->numberDensity();
-
-        // solve the set of equations represented by the matrix
-        Array solution = solveMatrixEquation(matrix);
+        catch (const std::exception& e)
+        {
+            throw FATALERROR(std::string("Level population solve failed: ") + e.what());
+        }
 
         // update the level populations, keeping track of the amount of change
         double change = 0.;
