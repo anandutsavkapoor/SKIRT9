@@ -178,8 +178,7 @@ void DiffuseIonizedGasMix::setupSelfBefore()
         _transitionTemperatureTable.open(this, "DiffuseIonizedGas5Bin_Transition_multiZ_Temperature",
                                          "Z(1),n_H(1/m3),logU(1),logR2(1),logR3(1),logR4(1),logR5(1)", "logT(K)", true);
 
-        // Cache the transition table's upper logU edge, where it meets the standard table,
-        // for the per-cell selectTable/getBlendingWeight hot path.
+        // Cache the transition table's upper logU edge, where it meets the standard table.
         Array logUAxis;
         _transitionTemperatureTable.axisArray<2>(logUAxis);
         _transitionLogUMax = logUAxis[logUAxis.size() - 1];
