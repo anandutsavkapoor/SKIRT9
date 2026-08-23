@@ -178,10 +178,10 @@ void DiffuseIonizedGasMix::setupSelfBefore()
         _transitionTemperatureTable.open(this, "DiffuseIonizedGas5Bin_Transition_multiZ_Temperature",
                                          "Z(1),n_H(1/m3),logU(1),logR2(1),logR3(1),logR4(1),logR5(1)", "logT(K)", true);
 
-        // Cache the transition table's logU axis edges for the per-cell selectTable/getBlendingWeight hot path.
+        // Cache the transition table's upper logU edge, where it meets the standard table,
+        // for the per-cell selectTable/getBlendingWeight hot path.
         Array logUAxis;
         _transitionTemperatureTable.axisArray<2>(logUAxis);
-        _transitionLogUMin = logUAxis[0];
         _transitionLogUMax = logUAxis[logUAxis.size() - 1];
     }
 
@@ -1094,18 +1094,16 @@ DisjointWavelengthGrid* DiffuseIonizedGasMix::emissionWavelengthGrid() const
 
 DiffuseIonizedGasMix::TableSelection DiffuseIonizedGasMix::selectTable(double logU) const
 {
-    // Transition-table logU edges were cached in setupSelfBefore.
+    // The transition table's upper logU edge was cached in setupSelfBefore.
     const double blendWidth = transitionBlendWidth();
 
-    // Core transition region
-    if (logU >= _transitionLogUMin + blendWidth && logU <= _transitionLogUMax - blendWidth)
-        return TableSelection::Transition;
-
-    // Far from transition range - use standard
-    if (logU < _transitionLogUMin - blendWidth || logU > _transitionLogUMax + blendWidth)
-        return TableSelection::Standard;
-
-    // In blending region
+    // The tables share data only at their common edge, _transitionLogUMax, so blend
+    // there and nowhere else. Below it Transition applies and clamps at its own
+    // floor; Standard would clamp to the shared edge, handing near-neutral gas the
+    // opacity of gas at the ionised-neutral boundary. The opacity path is not gated
+    // by _minLogUEmit.
+    if (logU <= _transitionLogUMax - blendWidth) return TableSelection::Transition;
+    if (logU > _transitionLogUMax + blendWidth) return TableSelection::Standard;
     return TableSelection::Blend;
 }
 
@@ -1114,27 +1112,16 @@ DiffuseIonizedGasMix::TableSelection DiffuseIonizedGasMix::selectTable(double lo
 double DiffuseIonizedGasMix::getBlendingWeight(double logU) const
 {
     // Returns weight for transition table (0 = standard only, 1 = transition only).
-    // Transition-table logU edges were cached in setupSelfBefore.
+    // The transition table's upper logU edge was cached in setupSelfBefore.
     const double blendWidth = transitionBlendWidth();
 
-    // Lower blending region: transitioning into transition table
-    if (logU >= _transitionLogUMin - blendWidth && logU < _transitionLogUMin + blendWidth)
-    {
-        double weight = (logU - (_transitionLogUMin - blendWidth)) / (2.0 * blendWidth);
-        return std::max(0.0, std::min(1.0, weight));
-    }
-
-    // Upper blending region: transitioning back to standard
+    // Blend only at the tables' shared edge; see selectTable().
     if (logU > _transitionLogUMax - blendWidth && logU <= _transitionLogUMax + blendWidth)
     {
         double weight = ((_transitionLogUMax + blendWidth) - logU) / (2.0 * blendWidth);
         return std::max(0.0, std::min(1.0, weight));
     }
-
-    // Core transition region
-    if (logU >= _transitionLogUMin + blendWidth && logU <= _transitionLogUMax - blendWidth) return 1.0;
-
-    // Standard region
+    if (logU <= _transitionLogUMax - blendWidth) return 1.0;
     return 0.0;
 }
 
