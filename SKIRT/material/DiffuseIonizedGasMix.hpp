@@ -529,10 +529,8 @@ private:
     // Cached density ceiling in m^-3 (0 = disabled), set in setupSelfBefore from maxHydrogenDensity
     double _maxNH_m3 = 0.;
 
-    // Cached logU edges of the transition table's logU axis, set in setupSelfBefore
-    // from _transitionTemperatureTable.axisArray<2>(). Used in the per-cell table-selection
-    // and blending-weight hot path.
-    double _transitionLogUMin = 0.;
+    // Cached upper edge of the transition table's logU axis, where it meets the standard
+    // table, set in setupSelfBefore. Used when selecting between the two tables.
     double _transitionLogUMax = 0.;
 
     // Custom state variable indices
