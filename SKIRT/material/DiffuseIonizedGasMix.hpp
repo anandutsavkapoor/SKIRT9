@@ -49,12 +49,14 @@
       at the STAB-derived temperature, yielding ion fractions for all tracked species (H, He,
       C, N, O, Ne, Mg, Si, S, Fe) and the electron density. Key ion fractions (x_HII, x_NII,
       x_OI, x_OII, x_OIII, x_SII) and n_e are stored as custom state variables for diagnostics.
-    - <b>Emission</b> is computed from the converged radiation field, temperature, and ion fractions:
-      GasLineEmission computes the line luminosities: H and He recombination lines from Case B
-      emissivity tables, with the Storey & Hummer 1995 P_B form for H as fallback; collisional
-      lines from the statistical-equilibrium solver on the atomic data, with precomputed CHIANTI
-      q_col tables as fallback. GasContinuumEmission computes the nebular continuum (free-bound,
-      free-free, two-photon).
+    - <b>Emission</b> is computed from the converged radiation field, temperature, and ion
+      fractions: GasLineEmission (this class) computes the line luminosities, while
+      GasContinuumEmission computes the nebular continuum (free-bound, free-free, two-photon). By
+      default (\em includeExtendedLines=true), H and He recombination lines from Case B are obtained
+      from emissivity tables, and collisional lines from the statistical-equilibrium solver on the
+      atomic data. This obviously requires the corresponding resources to be installed. If \em
+      includeExtendedLines is set to false, the Storey & Hummer 1995 P_B form for H and precomputed
+      CHIANTI q_col tables are used as a fallback.
     - <b>Diffuse reemission</b> of absorbed ionizing photons follows Wood, Mathis & Ercolano (2004),
       with pre-tabulated temperature-dependent spectra for H/He Lyman continuum and He two-photon.
 
@@ -154,7 +156,7 @@
 class DiffuseIonizedGasMix : public EmittingGasMix
 {
     /** Selects how metal and helium abundances are handed to the analytical
-        emission solver. See the class docstring section "Abundances and
+        emission solver. See the class documentation section "Abundances and
         gas-phase depletion" for the full description. */
     ENUM_DEF(AbundanceMode, SolarScaled, PerCell)
         ENUM_VAL(AbundanceMode, SolarScaled, "solar pattern scaled by metallicity")
@@ -264,8 +266,12 @@ class DiffuseIonizedGasMix : public EmittingGasMix
         ATTRIBUTE_DEFAULT_VALUE(numEmissionWavelengths, "250")
         ATTRIBUTE_DISPLAYED_IF(numEmissionWavelengths, "Level3")
 
-        PROPERTY_DOUBLE(lineLuminosityFloor, "the relative luminosity floor for extended-inventory lines "
-                                             "(fraction of the brightest line in the cell; 0 keeps all lines)")
+        PROPERTY_BOOL(includeExtendedLines, "use Case B recombination tables and the atomic-model collisional "
+                                            "solver")
+        ATTRIBUTE_DEFAULT_VALUE(includeExtendedLines, "true")
+        ATTRIBUTE_DISPLAYED_IF(includeExtendedLines, "Level3")
+
+        PROPERTY_DOUBLE(lineLuminosityFloor, "the relative luminosity floor for extended-inventory lines")
         ATTRIBUTE_MIN_VALUE(lineLuminosityFloor, "[0")
         ATTRIBUTE_MAX_VALUE(lineLuminosityFloor, "1]")
         ATTRIBUTE_DEFAULT_VALUE(lineLuminosityFloor, "0")

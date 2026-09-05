@@ -945,16 +945,9 @@ double NonLTELineGasMix::solveLevelPopulations(MaterialState* state, const Array
 
     // solve the statistical equilibrium equations with the shared solver; it handles both the
     // radiative terms (Einstein A always, Bul/Blu weighted by env.meanJ) and the collisional terms
-    // (using _model.colPartner, with the same robustness against degenerate rates and densities)
-    std::vector<double> solution;
-    try
-    {
-        solution = GasLineEmission::solveLevelPopulations(_model, env);
-    }
-    catch (const std::exception& e)
-    {
-        throw FATALERROR(std::string("Level population solve failed: ") + e.what());
-    }
+    // (using _model.colPartner, with the same robustness against degenerate rates and densities),
+    // and throws FatalError directly on a singular matrix or non-finite solution
+    std::vector<double> solution = GasLineEmission::solveLevelPopulations(_model, env);
 
     // update the level populations, keeping track of the amount of change
     double change = 0.;

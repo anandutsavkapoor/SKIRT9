@@ -5,10 +5,11 @@
 
 #include "GasLineEmission.hpp"
 #include "Constants.hpp"
+#include "FatalError.hpp"
+#include "FilePaths.hpp"
 #include <fstream>
 #include <set>
 #include <sstream>
-#include <stdexcept>
 
 //////////////////////////////////////////////////////////////////////
 
@@ -883,10 +884,9 @@ namespace
     void readRecombStab(const std::string& path, RecombTable& table)
     {
         std::ifstream file(path, std::ios::binary);
-        if (!file.is_open()) throw std::runtime_error("Cannot open recombination table: " + path);
+        if (!file.is_open()) throw FATALERROR("Cannot open recombination table: " + path);
         auto verify = [&path](bool condition, const char* what) {
-            if (!condition)
-                throw std::runtime_error(std::string("Invalid recombination table (") + what + "): " + path);
+            if (!condition) throw FATALERROR(std::string("Invalid recombination table (") + what + "): " + path);
         };
         verify(readStabString(file) == "SKIRT X", "magic");
         verify(readStabUInt(file) == 0x010203040A0BFEFFull, "endianness");
@@ -984,13 +984,13 @@ namespace
 
 //////////////////////////////////////////////////////////////////////
 
-void GasLineEmission::initializeRecombinationTables(const std::string& directory)
+void GasLineEmission::initializeRecombinationTables()
 {
     if (_recombRegistry.ready) return;
 
     for (const auto& entry : recombLineFiles())
     {
-        readRecombStab(directory + "/" + entry.filename, _recombRegistry.table[entry.lineIdx]);
+        readRecombStab(FilePaths::resource(entry.filename), _recombRegistry.table[entry.lineIdx]);
         _recombRegistry.loaded[entry.lineIdx] = true;
     }
     _recombRegistry.ready = true;
@@ -1045,7 +1045,7 @@ namespace
     std::vector<std::vector<double>> readDataFile(const std::string& path)
     {
         std::ifstream file(path);
-        if (!file.is_open()) throw std::runtime_error("Cannot open atomic data file: " + path);
+        if (!file.is_open()) throw FATALERROR("Cannot open atomic data file: " + path);
         std::vector<std::vector<double>> rows;
         std::string line;
         while (std::getline(file, line))
@@ -1106,7 +1106,7 @@ namespace
                     std::swap(solution[k], solution[maxRow]);
                 }
                 else
-                    throw std::runtime_error("Level population matrix is singular at row " + std::to_string(k));
+                    throw FATALERROR("Level population matrix is singular at row " + std::to_string(k));
             }
             for (size_t i = k + 1; i < size; ++i)
             {
@@ -1122,7 +1122,7 @@ namespace
             for (size_t j = i + 1; j < size; ++j) solution[i] -= matrix[i][j] * solution[j];
             solution[i] /= matrix[i][i];
             if (!std::isfinite(solution[i]))
-                throw std::runtime_error("Level population solution is not finite at index " + std::to_string(i));
+                throw FATALERROR("Level population solution is not finite at index " + std::to_string(i));
         }
         return solution;
     }
@@ -1130,17 +1130,16 @@ namespace
 
 //////////////////////////////////////////////////////////////////////
 
-void GasLineEmission::loadAtomicModel(const std::string& directory, const std::string& speciesName,
-                                      const std::vector<std::string>& partnerNames, int maxNumLevels,
-                                      AtomicModel& model)
+void GasLineEmission::loadAtomicModel(const std::string& speciesName, const std::vector<std::string>& partnerNames,
+                                      int maxNumLevels, AtomicModel& model)
 {
     model = AtomicModel();
 
     // mass [amu -> kg]
-    model.mass = readDataFile(directory + "/" + speciesName + "_Mass.txt")[0][0] * Constants::amu();
+    model.mass = readDataFile(FilePaths::resource(speciesName + "_Mass.txt"))[0][0] * Constants::amu();
 
     // energy levels [cm^-1 -> J] and statistical weights, capped at maxNumLevels
-    for (const auto& row : readDataFile(directory + "/" + speciesName + "_Energy.txt"))
+    for (const auto& row : readDataFile(FilePaths::resource(speciesName + "_Energy.txt")))
     {
         model.energy.push_back(row[0] * 100. * Constants::h() * Constants::c());
         model.weight.push_back(row[1]);
@@ -1149,7 +1148,7 @@ void GasLineEmission::loadAtomicModel(const std::string& directory, const std::s
     int numLevels = model.numLevels();
 
     // radiative transitions, dropping any that involve levels beyond the cap
-    for (const auto& row : readDataFile(directory + "/" + speciesName + "_Rad_Coeff.txt"))
+    for (const auto& row : readDataFile(FilePaths::resource(speciesName + "_Rad_Coeff.txt")))
     {
         int up = static_cast<int>(row[0]), low = static_cast<int>(row[1]);
         if (up < numLevels && low < numLevels)
@@ -1184,9 +1183,9 @@ void GasLineEmission::loadAtomicModel(const std::string& directory, const std::s
     {
         AtomicModel::ColPartner partner;
         partner.name = pname;
-        for (const auto& row : readDataFile(directory + "/" + speciesName + "_Col_" + pname + "_Temp.txt"))
+        for (const auto& row : readDataFile(FilePaths::resource(speciesName + "_Col_" + pname + "_Temp.txt")))
             partner.T.push_back(row[0]);
-        for (const auto& row : readDataFile(directory + "/" + speciesName + "_Col_" + pname + "_Coeff.txt"))
+        for (const auto& row : readDataFile(FilePaths::resource(speciesName + "_Col_" + pname + "_Coeff.txt")))
         {
             int up = static_cast<int>(row[0]), low = static_cast<int>(row[1]);
             if (up < numLevels && low < numLevels)
@@ -1312,7 +1311,7 @@ namespace
 
 //////////////////////////////////////////////////////////////////////
 
-void GasLineEmission::initializeAtomicModels(const std::string& directory)
+void GasLineEmission::initializeAtomicModels()
 {
     if (_atomicRegistry.ready) return;
 
@@ -1336,7 +1335,7 @@ void GasLineEmission::initializeAtomicModels(const std::string& directory)
     for (const auto& entry : table)
     {
         AtomicModel model;
-        loadAtomicModel(directory, entry.name, {"e-"}, 20, model);
+        loadAtomicModel(entry.name, {"e-"}, 20, model);
         int slot = static_cast<int>(_atomicRegistry.models.size());
         _atomicRegistry.models.push_back(std::move(model));
         _atomicRegistry.modelNames.push_back(entry.name);
@@ -1427,12 +1426,11 @@ namespace
 
 //////////////////////////////////////////////////////////////////////
 
-int GasLineEmission::extendLineRegistry(const std::string& recombDirectory, const std::string& atomicDirectory,
-                                        const std::vector<SpeciesSpec>& species)
+int GasLineEmission::extendLineRegistry(const std::vector<SpeciesSpec>& species)
 {
     auto& registry = mutableLineRegistry();
     if (!_recombRegistry.ready || !_atomicRegistry.ready)
-        throw std::runtime_error("Extending the line registry requires the recombination tables and solver models");
+        throw FATALERROR("Extending the line registry requires the recombination tables and solver models");
     if (static_cast<int>(registry.size()) > numLines) return 0;
 
     // file names already claimed by the built-in recombination lines
@@ -1450,9 +1448,8 @@ int GasLineEmission::extendLineRegistry(const std::string& recombDirectory, cons
     // recombination inventory: every table enumerated by the per-set wavelength index files
     for (const auto& set : _recombSets)
     {
-        std::ifstream index(recombDirectory + "/" + set.indexFile);
-        if (!index.is_open())
-            throw std::runtime_error(std::string("Cannot open recombination index file: ") + set.indexFile);
+        std::ifstream index(FilePaths::resource(set.indexFile));
+        if (!index.is_open()) throw FATALERROR(std::string("Cannot open recombination index file: ") + set.indexFile);
         double wavelengthA;
         while (index >> wavelengthA)
         {
@@ -1460,7 +1457,7 @@ int GasLineEmission::extendLineRegistry(const std::string& recombDirectory, cons
             if (!claimedFiles.insert(filename).second) continue;
 
             RecombTable table;
-            readRecombStab(recombDirectory + "/" + filename, table);
+            readRecombStab(FilePaths::resource(filename), table);
             registry.push_back({wavelengthA * 1e-10, set.mass, -1, -1, set.isHeI, set.isHeII});
             _recombRegistry.table.push_back(std::move(table));
             _recombRegistry.loaded.push_back(true);
@@ -1478,15 +1475,12 @@ int GasLineEmission::extendLineRegistry(const std::string& recombDirectory, cons
             if (_atomicRegistry.modelNames[m] == spec.name) slot = m;
         if (slot < 0)
         {
+            // not every candidate (element, ionization-stage) species has data in the resource
+            // pack; skip absent ones by checking first rather than treating that as an error
+            if (!FilePaths::hasResource(spec.name + "_Mass.txt")) continue;
+
             AtomicModel model;
-            try
-            {
-                loadAtomicModel(atomicDirectory, spec.name, {"e-"}, 20, model);
-            }
-            catch (const std::runtime_error&)
-            {
-                continue;
-            }
+            loadAtomicModel(spec.name, {"e-"}, 20, model);
             slot = static_cast<int>(_atomicRegistry.models.size());
             _atomicRegistry.models.push_back(std::move(model));
             _atomicRegistry.modelNames.push_back(spec.name);

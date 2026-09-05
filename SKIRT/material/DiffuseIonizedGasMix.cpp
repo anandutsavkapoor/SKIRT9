@@ -8,7 +8,6 @@
 #include "Constants.hpp"
 #include "DisjointWavelengthGrid.hpp"
 #include "FatalError.hpp"
-#include "FilePaths.hpp"
 #include "GasContinuumEmission.hpp"
 #include "GasLineEmission.hpp"
 #include "Log.hpp"
@@ -343,73 +342,38 @@ void DiffuseIonizedGasMix::setupSelfBefore()
         rfDlambdav = rfWavelengthGrid->dlambdav();
         _emissionSolver.initialize(rfLambdav, rfDlambdav);
 
-        // use the statistical-equilibrium solver for the collisional lines when the atomic data
-        // resources are available; otherwise the precomputed q_col tables
-        try
+        // includeExtendedLines=true requires the full resource set (statistical-equilibrium solver,
+        // Case B emissivity tables, extended line registry): a missing resource is a fatal
+        // configuration error rather than a silent fallback. includeExtendedLines=false skips all
+        // three unconditionally, regardless of whether the resources happen to be installed, so
+        // that the fallback lines (legacy P_B recombination, precomputed q_col collisional rates,
+        // built-in registry only) stay reachable and testable on their own.
+        if (includeExtendedLines())
         {
-            string path = FilePaths::resource("O_III_Energy.txt");
-            GasLineEmission::initializeAtomicModels(path.substr(0, path.find_last_of('/')));
+            GasLineEmission::initializeAtomicModels();
             find<Log>()->info("Collisional line emission uses the statistical-equilibrium solver");
-        }
-        catch (const FatalError&)
-        {
-            find<Log>()->warning("Atomic data resources not found; collisional line emission uses the "
-                                 "precomputed q_col tables");
-        }
 
-        // use the Case B emissivity tables for the H and He recombination lines when the
-        // resources are available; otherwise the H lines use the legacy P_B form and the He
-        // lines are zero
-        try
-        {
-            string path = FilePaths::resource("HI_CaseB_6564A_line.stab");
-            GasLineEmission::initializeRecombinationTables(path.substr(0, path.find_last_of('/')));
+            GasLineEmission::initializeRecombinationTables();
             find<Log>()->info("Recombination line emission uses the Case B emissivity tables");
-        }
-        catch (const FatalError&)
-        {
-            find<Log>()->warning("Recombination table resources not found; H lines use the "
-                                 "legacy P_B form and He lines are disabled");
-        }
-        catch (const std::exception& e)
-        {
-            find<Log>()->warning(string("Recombination tables could not be loaded (") + e.what()
-                                 + "); H lines use the legacy P_B form and He lines are disabled");
-        }
 
-        // append the extended inventory to the line registry when both resource families
-        // are available
-        if (GasLineEmission::recombinationTablesReady() && GasLineEmission::atomicModelsReady())
+            static const char* romans[] = {"I", "II", "III", "IV",   "V",   "VI", "VII", "VIII", "IX",
+                                           "X", "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII"};
+            static const char* metals[] = {"C", "N", "O", "Ne", "Mg", "Si", "S", "Fe"};
+            std::vector<GasLineEmission::SpeciesSpec> species;
+            for (int e = 0; e != 8; ++e)
+            {
+                int elem = e + 2;
+                for (int s = 1; s <= PhotoIonizationSolver::numStages[elem]; ++s)
+                    species.push_back(
+                        {string(metals[e]) + "_" + romans[s - 1], PhotoIonizationSolver::stageOffset[elem] + s - 1, e});
+            }
+            int numAdded = GasLineEmission::extendLineRegistry(species);
+            find<Log>()->info("Added " + std::to_string(numAdded) + " lines to the line registry");
+        }
+        else
         {
-            try
-            {
-                static const char* romans[] = {"I", "II", "III", "IV",   "V",   "VI", "VII", "VIII", "IX",
-                                               "X", "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII"};
-                static const char* metals[] = {"C", "N", "O", "Ne", "Mg", "Si", "S", "Fe"};
-                std::vector<GasLineEmission::SpeciesSpec> species;
-                for (int e = 0; e != 8; ++e)
-                {
-                    int elem = e + 2;
-                    for (int s = 1; s <= PhotoIonizationSolver::numStages[elem]; ++s)
-                        species.push_back({string(metals[e]) + "_" + romans[s - 1],
-                                           PhotoIonizationSolver::stageOffset[elem] + s - 1, e});
-                }
-                string recombDir = FilePaths::resource("HI_wavelengths.txt");
-                recombDir = recombDir.substr(0, recombDir.find_last_of('/'));
-                string atomicDir = FilePaths::resource("O_III_Energy.txt");
-                atomicDir = atomicDir.substr(0, atomicDir.find_last_of('/'));
-                int numAdded = GasLineEmission::extendLineRegistry(recombDir, atomicDir, species);
-                find<Log>()->info("Added " + std::to_string(numAdded) + " lines to the line registry");
-            }
-            catch (const FatalError&)
-            {
-                find<Log>()->warning("Line registry extension resources not found; using the built-in lines");
-            }
-            catch (const std::exception& e)
-            {
-                find<Log>()->warning(string("Line registry extension could not be loaded (") + e.what()
-                                     + "); using the built-in lines");
-            }
+            find<Log>()->info("includeExtendedLines is false; using the built-in fallback lines\n"
+                              "  (legacy P_B recombination, precomputed q_col collisional rates)");
         }
 
         // select the active lines from the registry (see _activeLines)

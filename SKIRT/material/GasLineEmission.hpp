@@ -100,14 +100,12 @@ public:
         int elementIndex;     // abundance element index
     };
 
-    /** Appends every recombination table listed in the per-set wavelength index files of
-        recombDirectory and every radiative transition of each loadable species in atomicDirectory
-        (absent species are skipped; built-in lines are not duplicated). Requires
+    /** Appends every recombination table listed in the per-set wavelength index files and every
+        radiative transition of each loadable species (all resolved via FilePaths::resource();
+        absent species are skipped; built-in lines are not duplicated). Requires
         initializeRecombinationTables() and initializeAtomicModels() to have completed (throws
-        std::runtime_error otherwise). Idempotent. Returns the
-        number of lines added. */
-    static int extendLineRegistry(const std::string& recombDirectory, const std::string& atomicDirectory,
-                                  const std::vector<SpeciesSpec>& species);
+        FatalError otherwise). Idempotent. Returns the number of lines added. */
+    static int extendLineRegistry(const std::vector<SpeciesSpec>& species);
 
     // Rest-frame wavelengths [m]
     static constexpr double lineWavelengths[numLines] = {
@@ -215,9 +213,9 @@ public:
     static double recombinationLineLuminosity(int lineIdx, double T, double ne, double nIon, double gammaHI, double nHI,
                                               double V_cm3);
 
-    /** Loads the Case B emissivity tables (stored-table format, flat directory). Idempotent;
-        throws std::runtime_error on a missing or malformed file. */
-    static void initializeRecombinationTables(const std::string& directory);
+    /** Loads the Case B emissivity tables (stored-table format), each resolved via
+        FilePaths::resource(). Idempotent; throws FatalError on a missing or malformed file. */
+    static void initializeRecombinationTables();
 
     /** Returns true when initializeRecombinationTables() has completed. */
     static bool recombinationTablesReady();
@@ -232,7 +230,7 @@ public:
 
     /** Loads the atomic models of the built-in collisional lines' carrier species and maps each
         line to its transition by nearest wavelength. Idempotent. */
-    static void initializeAtomicModels(const std::string& directory);
+    static void initializeAtomicModels();
 
     /** Returns true when initializeAtomicModels() has completed. */
     static bool atomicModelsReady();
@@ -286,18 +284,18 @@ public:
         std::function<void(const std::string&)> warn;  // optional warning sink
     };
 
-    /** Fills model from the files NAME_Mass.txt, NAME_Energy.txt, NAME_Rad_Coeff.txt and
-        NAME_Col_PARTNER_Temp.txt / NAME_Col_PARTNER_Coeff.txt in directory (NAME the species name,
-        PARTNER each collision partner), keeping at most maxNumLevels levels. Throws
-        std::runtime_error if a file cannot be opened. */
-    static void loadAtomicModel(const std::string& directory, const std::string& speciesName,
-                                const std::vector<std::string>& partnerNames, int maxNumLevels, AtomicModel& model);
+    /** Fills model from the resource files NAME_Mass.txt, NAME_Energy.txt, NAME_Rad_Coeff.txt and
+        NAME_Col_PARTNER_Temp.txt / NAME_Col_PARTNER_Coeff.txt (NAME the species name, PARTNER each
+        collision partner), each resolved via FilePaths::resource(), keeping at most maxNumLevels
+        levels. Throws FatalError if a file cannot be found. */
+    static void loadAtomicModel(const std::string& speciesName, const std::vector<std::string>& partnerNames,
+                                int maxNumLevels, AtomicModel& model);
 
     /** The atomic model loaded by initializeAtomicModels() into the given slot (see lineModelSlot()). */
     static const AtomicModel& atomicModel(int slot);
 
     /** Solves the statistical-equilibrium rate matrix and returns level populations [m^-3]
-        normalized to env.nTotal. Throws std::runtime_error if the matrix is singular or the
+        normalized to env.nTotal. Throws FatalError if the matrix is singular or the
         solution is not finite. */
     static std::vector<double> solveLevelPopulations(const AtomicModel& model, const Environment& env);
 
