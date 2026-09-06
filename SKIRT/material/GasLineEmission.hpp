@@ -8,6 +8,7 @@
 
 #include "Basics.hpp"
 #include <functional>
+class SimulationItem;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -213,9 +214,13 @@ public:
     static double recombinationLineLuminosity(int lineIdx, double T, double ne, double nIon, double gammaHI, double nHI,
                                               double V_cm3);
 
-    /** Loads the Case B emissivity tables (stored-table format), each resolved via
-        FilePaths::resource(). Idempotent; throws FatalError on a missing or malformed file. */
-    static void initializeRecombinationTables();
+    /** Loads the Case B emissivity tables (StoredTable, resolved via FilePaths::resource()) and
+        keeps the resulting StoredTable instances open for the lifetime of the program (they are
+        memory-mapped, so this holds no data in memory beyond what is actually looked up). The item
+        argument is passed through to StoredTable::open() for each table (used only to retrieve a
+        logger; not otherwise a SimulationItem in this hierarchy). Idempotent; throws FatalError on
+        a missing or malformed file. */
+    static void initializeRecombinationTables(const SimulationItem* item);
 
     /** Returns true when initializeRecombinationTables() has completed. */
     static bool recombinationTablesReady();

@@ -7,6 +7,7 @@
 #include "Constants.hpp"
 #include "FatalError.hpp"
 #include "FilePaths.hpp"
+#include "StoredTableDictionary.hpp"
 #include <fstream>
 #include <set>
 #include <sstream>
@@ -838,115 +839,26 @@ namespace
 {
     // ============== Case B recombination-line emissivity tables ==============
 
-    // 2D emissivity coefficient table eps(T, n_e) read from a SKIRT stored-table file
-    struct RecombTable
-    {
-        std::vector<double> Tgrid;  // temperature grid [K]
-        std::vector<double> ngrid;  // electron density grid [cm^-3]
-        std::vector<double> data;   // eps [W m3]; first axis (T) varies fastest
-    };
-
     // registry mapping recombination lines to loaded emissivity tables; filled at setup by
-    // initializeRecombinationTables() and extended by extendLineRegistry(),
-    // read-only afterwards
+    // initializeRecombinationTables() and extended by extendLineRegistry(), read-only afterwards.
+    // All of the underlying stab files are bundled into a single dictionary (see
+    // StoredTableDictionary) so that opening the full extended catalog does not require a separate
+    // memory map -- and thus a separate open file -- per line; StoredTable is move-only, so growing
+    // the table vector via push_back()/emplace_back() moves existing elements rather than copying
+    // them, which would be unsafe.
     struct RecombRegistry
     {
         bool ready = false;
-        std::vector<RecombTable> table = std::vector<RecombTable>(GasLineEmission::numLines);
+        StoredTableDictionary<2> dict;
+        std::vector<StoredTable<2>> table = std::vector<StoredTable<2>>(GasLineEmission::numLines);
         std::vector<bool> loaded = std::vector<bool>(GasLineEmission::numLines, false);
     };
     RecombRegistry _recombRegistry;
 
-    std::uint64_t readStabUInt(std::ifstream& file)
-    {
-        std::uint64_t v = 0;
-        file.read(reinterpret_cast<char*>(&v), 8);
-        return v;
-    }
-
-    std::string readStabString(std::ifstream& file)
-    {
-        char buffer[8];
-        file.read(buffer, 8);
-        std::string s(buffer, 8);
-        return s.substr(0, s.find_last_not_of(" \n") + 1);
-    }
-
-    std::vector<double> readStabDoubles(std::ifstream& file, size_t n)
-    {
-        std::vector<double> v(n);
-        file.read(reinterpret_cast<char*>(v.data()), 8 * n);
-        return v;
-    }
-
-    // reads and validates a 2D stored-table file with logarithmic T/n axes and a
-    // logarithmic Emis quantity, replicating the layout handled by StoredTable
-    void readRecombStab(const std::string& path, RecombTable& table)
-    {
-        std::ifstream file(path, std::ios::binary);
-        if (!file.is_open()) throw FATALERROR("Cannot open recombination table: " + path);
-        auto verify = [&path](bool condition, const char* what) {
-            if (!condition) throw FATALERROR(std::string("Invalid recombination table (") + what + "): " + path);
-        };
-        verify(readStabString(file) == "SKIRT X", "magic");
-        verify(readStabUInt(file) == 0x010203040A0BFEFFull, "endianness");
-        verify(readStabUInt(file) == 2, "axis count");
-        verify(readStabString(file) == "T" && readStabString(file) == "n", "axis names");
-        readStabString(file);  // axis units ("K", "1/cm3")
-        readStabString(file);
-        verify(readStabString(file) == "log" && readStabString(file) == "log", "axis scales");
-        table.Tgrid = readStabDoubles(file, readStabUInt(file));
-        table.ngrid = readStabDoubles(file, readStabUInt(file));
-        verify(readStabUInt(file) == 1, "quantity count");
-        verify(readStabString(file) == "Emis", "quantity name");
-        readStabString(file);  // quantity unit
-        verify(readStabString(file) == "log", "quantity scale");
-        table.data = readStabDoubles(file, table.Tgrid.size() * table.ngrid.size());
-        verify(readStabString(file) == "STABEND" && file.good(), "footer");
-    }
-
-    // clamped bin lookup for one logarithmic axis, replicating StoredTable::operator();
-    // sets the upper bin border index and returns the fraction of the value in the bin
-    double stabAxisFraction(const std::vector<double>& grid, double x, int& right)
-    {
-        right = static_cast<int>(std::lower_bound(grid.begin(), grid.end(), x) - grid.begin());
-        if (right == 0)
-        {
-            right = 1;
-            x = grid[0];
-        }
-        else if (right == static_cast<int>(grid.size()))
-        {
-            right--;
-            x = grid[right];
-        }
-        return (std::log(x) - std::log(grid[right - 1])) / (std::log(grid[right]) - std::log(grid[right - 1]));
-    }
-
-    // emissivity coefficient eps(T, ne) [W m3] interpolated with StoredTable semantics:
-    // out-of-range values clamped to the outer grid points, bilinear interpolation in
-    // log T and log ne of log eps, zero if a bordering table value is not positive
-    double recombEmissivity(const RecombTable& table, double T, double ne)
-    {
-        int iT, iN;
-        double fT = stabAxisFraction(table.Tgrid, T, iT);
-        double fN = stabAxisFraction(table.ngrid, ne, iN);
-        int numT = static_cast<int>(table.Tgrid.size());
-        double y = 0.;
-        for (int t = 0; t != 4; ++t)
-        {
-            int leftT = t & 1;
-            int leftN = (t >> 1) & 1;
-            double front = (leftT ? 1. - fT : fT) * (leftN ? 1. - fN : fN);
-            if (front)
-            {
-                double v = table.data[(iN - leftN) * numT + (iT - leftT)];
-                if (v <= 0.) return 0.;
-                y += front * std::log(v);
-            }
-        }
-        return std::exp(y);
-    }
+    // axes/quantity specification shared by every Case B emissivity table (verified against the
+    // resource files: 2D, logarithmic T[K]/n[1/cm3] axes, logarithmic dimensionless Emis quantity)
+    const char* recombAxes = "T(K),n(1/cm3)";
+    const char* recombQuantity = "Emis(1)";
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -984,13 +896,15 @@ namespace
 
 //////////////////////////////////////////////////////////////////////
 
-void GasLineEmission::initializeRecombinationTables()
+void GasLineEmission::initializeRecombinationTables(const SimulationItem* item)
 {
     if (_recombRegistry.ready) return;
 
+    _recombRegistry.dict.open(item, "EmissionCaseB.stabdict", recombAxes, recombQuantity);
+
     for (const auto& entry : recombLineFiles())
     {
-        readRecombStab(FilePaths::resource(entry.filename), _recombRegistry.table[entry.lineIdx]);
+        _recombRegistry.table[entry.lineIdx] = _recombRegistry.dict.open(entry.filename);
         _recombRegistry.loaded[entry.lineIdx] = true;
     }
     _recombRegistry.ready = true;
@@ -1010,7 +924,7 @@ double GasLineEmission::recombinationLineLuminosity(int lineIdx, double T, doubl
 {
     if (_recombRegistry.ready && _recombRegistry.loaded[lineIdx])
     {
-        double eps = recombEmissivity(_recombRegistry.table[lineIdx], T, ne);
+        double eps = _recombRegistry.table[lineIdx](T, ne);
         // eps [W m3] with cgs densities and volume: L [W] = eps * ne * nIon * V_cm3 * 1e6
         return eps * ne * nIon * V_cm3 * 1e6;
     }
@@ -1456,10 +1370,8 @@ int GasLineEmission::extendLineRegistry(const std::vector<SpeciesSpec>& species)
             std::string filename = set.prefix + std::to_string(static_cast<long long>(wavelengthA)) + "A_line.stab";
             if (!claimedFiles.insert(filename).second) continue;
 
-            RecombTable table;
-            readRecombStab(FilePaths::resource(filename), table);
+            _recombRegistry.table.push_back(_recombRegistry.dict.open(filename));
             registry.push_back({wavelengthA * 1e-10, set.mass, -1, -1, set.isHeI, set.isHeII});
-            _recombRegistry.table.push_back(std::move(table));
             _recombRegistry.loaded.push_back(true);
             _atomicRegistry.lineModel.push_back(-1);
             _atomicRegistry.lineTransition.push_back(-1);
@@ -1490,7 +1402,7 @@ int GasLineEmission::extendLineRegistry(const std::vector<SpeciesSpec>& species)
         {
             if (claimedTransitions.count({slot, t})) continue;
             registry.push_back({m.center[t], m.mass, spec.carrierIonIndex, spec.elementIndex, false, false});
-            _recombRegistry.table.push_back({});
+            _recombRegistry.table.emplace_back();
             _recombRegistry.loaded.push_back(false);
             _atomicRegistry.lineModel.push_back(slot);
             _atomicRegistry.lineTransition.push_back(t);

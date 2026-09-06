@@ -353,7 +353,7 @@ void DiffuseIonizedGasMix::setupSelfBefore()
             GasLineEmission::initializeAtomicModels();
             find<Log>()->info("Collisional line emission uses the statistical-equilibrium solver");
 
-            GasLineEmission::initializeRecombinationTables();
+            GasLineEmission::initializeRecombinationTables(this);
             find<Log>()->info("Recombination line emission uses the Case B emissivity tables");
 
             static const char* romans[] = {"I", "II", "III", "IV",   "V",   "VI", "VII", "VIII", "IX",
