@@ -14,10 +14,100 @@
 
 //////////////////////////////////////////////////////////////////////
 
-constexpr double GasLineEmission::lineWavelengths[GasLineEmission::numLines];
-constexpr double GasLineEmission::lineMasses[GasLineEmission::numLines];
-constexpr int GasLineEmission::lineCarrierIonIndex[GasLineEmission::numLines];
-constexpr int GasLineEmission::lineElementIndex[GasLineEmission::numLines];
+namespace
+{
+    // Rest-frame wavelengths [m]
+    constexpr double lineWavelengths[GasLineEmission::numLines] = {
+        1215.670e-10,  // Lya
+        6562.800e-10,  // Ha
+        4861.330e-10,  // Hb
+        4340.460e-10,  // Hg
+        4101.730e-10,  // Hd
+        3970.070e-10,  // He
+        1.87510e-6,    // Paa
+        1.28180e-6,    // Pab
+        4.05120e-6,    // Bra
+        5875.620e-10,  // He I 5876
+        6678.150e-10,  // He I 6678
+        7065.190e-10,  // He I 7065
+        1.08303e-6,    // He I 10830
+        1640.420e-10,  // He II 1640
+        4685.680e-10,  // He II 4686
+        6548.050e-10,  // [NII] 6548
+        6583.460e-10,  // [NII] 6583
+        6300.304e-10,  // [OI] 6300
+        6363.776e-10,  // [OI] 6364
+        3728.815e-10,  // [OII] 3729
+        3726.032e-10,  // [OII] 3726
+        4363.210e-10,  // [OIII] 4363
+        4958.911e-10,  // [OIII] 4959
+        5006.843e-10,  // [OIII] 5007
+        6716.440e-10,  // [SII] 6716
+        6730.810e-10,  // [SII] 6731
+    };
+
+    // Particle mass for Doppler broadening [kg]: m_p for H, 4 m_p for He, approximate for metals.
+    constexpr double lineMasses[GasLineEmission::numLines] = {
+        1.67262192e-27,         // Lya (H)
+        1.67262192e-27,         // Ha
+        1.67262192e-27,         // Hb
+        1.67262192e-27,         // Hg
+        1.67262192e-27,         // Hd
+        1.67262192e-27,         // He
+        1.67262192e-27,         // Paa
+        1.67262192e-27,         // Pab
+        1.67262192e-27,         // Bra
+        4.0 * 1.67262192e-27,   // HeI 5876
+        4.0 * 1.67262192e-27,   // HeI 6678
+        4.0 * 1.67262192e-27,   // HeI 7065
+        4.0 * 1.67262192e-27,   // HeI 10830
+        4.0 * 1.67262192e-27,   // HeII 1640
+        4.0 * 1.67262192e-27,   // HeII 4686
+        14.0 * 1.67262192e-27,  // NII
+        14.0 * 1.67262192e-27,  // NII
+        16.0 * 1.67262192e-27,  // OI
+        16.0 * 1.67262192e-27,  // OI
+        16.0 * 1.67262192e-27,  // OII
+        16.0 * 1.67262192e-27,  // OII
+        16.0 * 1.67262192e-27,  // OIII
+        16.0 * 1.67262192e-27,  // OIII
+        16.0 * 1.67262192e-27,  // OIII
+        32.0 * 1.67262192e-27,  // SII
+        32.0 * 1.67262192e-27,  // SII
+    };
+
+    // Ion stage index in PhotoIonizationSolver::ionFracs[] of the carrier ion of each collisional line
+    // N: stages 12-19 (NI=12, NII=13, ...)
+    // O: stages 20-28 (OI=20, OII=21, OIII=22, ...)
+    // S: stages 62-66 (SI=62, SII=63, ...)
+    constexpr int lineCarrierIonIndex[GasLineEmission::numLines] = {
+        -1, -1, -1, -1, -1, -1, -1, -1, -1,  // H lines: not from ion fractions
+        -1, -1, -1, -1, -1, -1,              // He lines: handled with the recombination family
+        13,                                  // [NII]  -> NII  = ion index 13
+        13,                                  // [NII]  -> NII
+        20,                                  // [OI]   -> OI   = ion index 20
+        20,                                  // [OI]   -> OI
+        21,                                  // [OII]  -> OII  = ion index 21
+        21,                                  // [OII]  -> OII
+        22,                                  // [OIII] -> OIII = ion index 22
+        22,                                  // [OIII] -> OIII
+        22,                                  // [OIII] -> OIII
+        63,                                  // [SII]  -> SII  = ion index 63
+        63,                                  // [SII]  -> SII
+    };
+
+    // Element index of the carrier of each collisional line (for the abundance lookup)
+    // 0=C, 1=N, 2=O, 3=Ne, 4=Mg, 5=Si, 6=S, 7=Fe
+    constexpr int lineElementIndex[GasLineEmission::numLines] = {
+        -1, -1, -1, -1, -1, -1, -1, -1, -1,  // H lines
+        -1, -1, -1, -1, -1, -1,              // He lines
+        1,  1,                               // NII -> N
+        2,  2,                               // OI -> O
+        2,  2,                               // OII -> O
+        2,  2,  2,                           // OIII -> O
+        6,  6,                               // SII -> S
+    };
+}
 
 //////////////////////////////////////////////////////////////////////
 
@@ -918,7 +1008,7 @@ namespace
     double tabulatedCollisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3)
     {
         double qcol = metalLineQcol(lineIdx, T, ne);
-        double lambda_m = GasLineEmission::lineWavelengths[lineIdx];
+        double lambda_m = lineWavelengths[lineIdx];
         double hnu = h_SI * c_SI / lambda_m;
         // L = h*nu * q_col * ne * nIon * V  [total luminosity in W]
         return hnu * qcol * ne * nIon * V_cm3;

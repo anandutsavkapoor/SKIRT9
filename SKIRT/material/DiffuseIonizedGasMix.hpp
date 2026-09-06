@@ -405,23 +405,10 @@ private:
     // Convert Rydberg energy to wavelength in metres
     double rydbergToWavelength(double energy_ryd) const;
 
-    // Reemission probability indices (following CMACIONIZE nomenclature)
-    enum ReemissionChannel {
-        Hydrogen = 0,    // Hydrogen Lyman continuum
-        HeliumLyC = 1,   // Helium Lyman continuum
-        HeliumNpEv = 2,  // He 19.8 eV line
-        HeliumTPC = 3,   // Helium two-photon continuum
-        HeliumLyA = 4,   // Helium Lyman alpha
-    };
-    static constexpr int numReemissionChannels = 5;
-
-    struct ReemissionData
-    {
-        bool valid = false;
-        double probabilities[numReemissionChannels];
-        double cumulativeProbabilities[numReemissionChannels];
-        double pHabs;  // Probability of H absorption vs He
-    };
+    // Per-channel reemission probabilities for a cell/wavelength; defined in the .cpp along with the
+    // channel enumeration and the probabilities array size, none of which is needed outside this
+    // class's own translation unit
+    struct ReemissionData;
 
     // Reemission calculation methods (adapted from CMACIONIZE)
     void calculateReemissionProbabilities(const MaterialState* state, double lambda, ReemissionData& data) const;

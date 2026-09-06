@@ -157,7 +157,27 @@ namespace
         const double X = 1.0 - Y - Z;
         return Y / (4.0 * X);
     }
+
+    // Reemission probability indices (following CMACIONIZE nomenclature)
+    enum ReemissionChannel {
+        Hydrogen = 0,    // Hydrogen Lyman continuum
+        HeliumLyC = 1,   // Helium Lyman continuum
+        HeliumNpEv = 2,  // He 19.8 eV line
+        HeliumTPC = 3,   // Helium two-photon continuum
+        HeliumLyA = 4,   // Helium Lyman alpha
+    };
+    static constexpr int numReemissionChannels = 5;
 }
+
+// out-of-line definition of the ReemissionData type forward-declared in the header (see there for
+// why): none of its details are needed outside this translation unit
+struct DiffuseIonizedGasMix::ReemissionData
+{
+    bool valid = false;
+    double probabilities[numReemissionChannels];
+    double cumulativeProbabilities[numReemissionChannels];
+    double pHabs;  // Probability of H absorption vs He
+};
 
 ////////////////////////////////////////////////////////////////////
 
