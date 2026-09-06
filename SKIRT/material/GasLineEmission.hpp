@@ -131,8 +131,12 @@ public:
         radiative transition of each loadable species (all resolved via FilePaths::resource();
         absent species are skipped; built-in lines are not duplicated). Requires
         initializeRecombinationTables() and initializeAtomicModels() to have completed (throws
-        FatalError otherwise). Idempotent. Returns the number of lines added. */
-    int extendLineRegistry(const std::vector<SpeciesSpec>& species);
+        FatalError otherwise). Idempotent. The \em item argument is passed through to
+        loadAtomicModel() for each newly loaded species (used only to retrieve the units system and
+        a logger); this function itself issues a single log message summarizing how many new atomic
+        models were loaded, regardless of how many species were considered. Returns the number of
+        lines added. */
+    int extendLineRegistry(const SimulationItem* item, const std::vector<SpeciesSpec>& species);
 
     // Rest-frame wavelengths [m]
     static constexpr double lineWavelengths[numLines] = {
@@ -260,8 +264,10 @@ public:
     double collisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3) const;
 
     /** Loads the atomic models of the built-in collisional lines' carrier species and maps each
-        line to its transition by nearest wavelength. Idempotent. */
-    void initializeAtomicModels();
+        line to its transition by nearest wavelength. Idempotent. The \em item argument is passed
+        through to loadAtomicModel() for each species (used only to retrieve the units system and a
+        logger). */
+    void initializeAtomicModels(const SimulationItem* item);
 
     /** Returns true when initializeAtomicModels() has completed. */
     bool atomicModelsReady() const;
@@ -317,10 +323,14 @@ public:
 
     /** Fills model from the resource files NAME_Mass.txt, NAME_Energy.txt, NAME_Rad_Coeff.txt and
         NAME_Col_PARTNER_Temp.txt / NAME_Col_PARTNER_Coeff.txt (NAME the species name, PARTNER each
-        collision partner), each resolved via FilePaths::resource(), keeping at most maxNumLevels
-        levels. Throws FatalError if a file cannot be found. */
-    static void loadAtomicModel(const std::string& speciesName, const std::vector<std::string>& partnerNames,
-                                int maxNumLevels, AtomicModel& model);
+        collision partner), each resolved via TextInFile as a resource file, keeping at most
+        maxNumLevels levels. Throws FatalError if a file cannot be found. The \em item argument is
+        passed through to TextInFile for each of these files (used only to retrieve the units
+        system and a logger); every file is opened silently (see TextInFile), so a caller loading
+        many species in a loop should issue its own single summary log message for the operation as
+        a whole. */
+    static void loadAtomicModel(const SimulationItem* item, const std::string& speciesName,
+                                const std::vector<std::string>& partnerNames, int maxNumLevels, AtomicModel& model);
 
     /** The atomic model loaded by initializeAtomicModels() into the given slot (see lineModelSlot()). */
     const AtomicModel& atomicModel(int slot) const;

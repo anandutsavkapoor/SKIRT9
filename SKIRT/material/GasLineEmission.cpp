@@ -7,10 +7,10 @@
 #include "Constants.hpp"
 #include "FatalError.hpp"
 #include "FilePaths.hpp"
+#include "Log.hpp"
 #include "StoredTableDictionary.hpp"
-#include <fstream>
+#include "TextInFile.hpp"
 #include <set>
-#include <sstream>
 
 //////////////////////////////////////////////////////////////////////
 
@@ -931,25 +931,6 @@ namespace
 {
     // ============== Level populations (statistical equilibrium) ==============
 
-    // reads the non-comment rows of a whitespace-separated text data file
-    std::vector<std::vector<double>> readDataFile(const std::string& path)
-    {
-        std::ifstream file(path);
-        if (!file.is_open()) throw FATALERROR("Cannot open atomic data file: " + path);
-        std::vector<std::vector<double>> rows;
-        std::string line;
-        while (std::getline(file, line))
-        {
-            if (line.empty() || line[0] == '#') continue;
-            std::istringstream ss(line);
-            std::vector<double> row;
-            double v;
-            while (ss >> v) row.push_back(v);
-            if (!row.empty()) rows.push_back(row);
-        }
-        return rows;
-    }
-
     // clamped log-log interpolation replicating NR::clampedValue<NR::interpolateLogLog>
     double clampedLogLog(double x, const std::vector<double>& xv, const std::vector<double>& yv)
     {
@@ -1020,32 +1001,51 @@ namespace
 
 //////////////////////////////////////////////////////////////////////
 
-void GasLineEmission::loadAtomicModel(const std::string& speciesName, const std::vector<std::string>& partnerNames,
-                                      int maxNumLevels, AtomicModel& model)
+void GasLineEmission::loadAtomicModel(const SimulationItem* item, const std::string& speciesName,
+                                      const std::vector<std::string>& partnerNames, int maxNumLevels,
+                                      AtomicModel& model)
 {
     model = AtomicModel();
 
-    // mass [amu -> kg]
-    model.mass = readDataFile(FilePaths::resource(speciesName + "_Mass.txt"))[0][0] * Constants::amu();
-
-    // energy levels [cm^-1 -> J] and statistical weights, capped at maxNumLevels
-    for (const auto& row : readDataFile(FilePaths::resource(speciesName + "_Energy.txt")))
+    // mass
     {
-        model.energy.push_back(row[0] * 100. * Constants::h() * Constants::c());
-        model.weight.push_back(row[1]);
-        if (static_cast<int>(model.energy.size()) == maxNumLevels) break;
+        TextInFile infile(item, speciesName + "_Mass.txt", "mass", true, true);
+        infile.addColumn("Mass", "mass", "amu");
+        double mass;
+        if (infile.readRow(mass)) model.mass = mass;
+    }
+
+    // energy levels and statistical weights, capped at maxNumLevels
+    {
+        TextInFile infile(item, speciesName + "_Energy.txt", "energy levels", true, true);
+        infile.addColumn("Energy", "energy", "1/cm");
+        infile.addColumn("Weight");
+        double energy, weight;
+        while (infile.readRow(energy, weight))
+        {
+            model.energy.push_back(energy);
+            model.weight.push_back(weight);
+            if (static_cast<int>(model.energy.size()) == maxNumLevels) break;
+        }
     }
     int numLevels = model.numLevels();
 
     // radiative transitions, dropping any that involve levels beyond the cap
-    for (const auto& row : readDataFile(FilePaths::resource(speciesName + "_Rad_Coeff.txt")))
     {
-        int up = static_cast<int>(row[0]), low = static_cast<int>(row[1]);
-        if (up < numLevels && low < numLevels)
+        TextInFile infile(item, speciesName + "_Rad_Coeff.txt", "radiative transitions", true, true);
+        infile.addColumn("Up index");
+        infile.addColumn("Low index");
+        infile.addColumn("Einstein A", "transitionrate", "1/s");
+        double up, low, rate;
+        while (infile.readRow(up, low, rate))
         {
-            model.indexUpRad.push_back(up);
-            model.indexLowRad.push_back(low);
-            model.einsteinA.push_back(row[2]);
+            int indexUp = static_cast<int>(up), indexLow = static_cast<int>(low);
+            if (indexUp < numLevels && indexLow < numLevels)
+            {
+                model.indexUpRad.push_back(indexUp);
+                model.indexLowRad.push_back(indexLow);
+                model.einsteinA.push_back(rate);
+            }
         }
     }
     int numRad = model.numLines();
@@ -1068,23 +1068,39 @@ void GasLineEmission::loadAtomicModel(const std::string& speciesName, const std:
         model.branchRatio[k] = sumA[up] > 0. ? model.einsteinA[k] / sumA[up] : 0.;
     }
 
-    // collisional transitions per partner [cm3/s -> m3/s]
+    // collisional transitions per partner
     for (const auto& pname : partnerNames)
     {
         AtomicModel::ColPartner partner;
         partner.name = pname;
-        for (const auto& row : readDataFile(FilePaths::resource(speciesName + "_Col_" + pname + "_Temp.txt")))
-            partner.T.push_back(row[0]);
-        for (const auto& row : readDataFile(FilePaths::resource(speciesName + "_Col_" + pname + "_Coeff.txt")))
+
         {
-            int up = static_cast<int>(row[0]), low = static_cast<int>(row[1]);
-            if (up < numLevels && low < numLevels)
+            TextInFile infile(item, speciesName + "_Col_" + pname + "_Temp.txt", "temperature grid", true, true);
+            infile.addColumn("Temperature", "temperature", "K");
+            Array tgrid;
+            infile.readAllColumns(tgrid);
+            partner.T.assign(begin(tgrid), end(tgrid));
+        }
+
+        {
+            int numTemperatures = static_cast<int>(partner.T.size());
+            TextInFile infile(item, speciesName + "_Col_" + pname + "_Coeff.txt", "collisional transitions", true,
+                              true);
+            infile.addColumn("Up index");
+            infile.addColumn("Low index");
+            for (int i = 0; i != numTemperatures; ++i) infile.addColumn("Collisional K", "collisionalrate", "cm3/s");
+            Array row;
+            while (infile.readRow(row))
             {
-                partner.indexUpCol.push_back(up);
-                partner.indexLowCol.push_back(low);
-                std::vector<double> K(row.begin() + 2, row.end());
-                for (auto& v : K) v *= 1e-6;
-                partner.Kul.push_back(std::move(K));
+                int up = static_cast<int>(row[0]), low = static_cast<int>(row[1]);
+                if (up < numLevels && low < numLevels)
+                {
+                    partner.indexUpCol.push_back(up);
+                    partner.indexLowCol.push_back(low);
+                    std::vector<double> K(numTemperatures);
+                    for (int i = 0; i != numTemperatures; ++i) K[i] = row[i + 2];
+                    partner.Kul.push_back(std::move(K));
+                }
             }
         }
         model.colPartner.push_back(std::move(partner));
@@ -1185,7 +1201,7 @@ double GasLineEmission::solvedCollisionalLineLuminosity(int lineIdx, double T, d
 
 //////////////////////////////////////////////////////////////////////
 
-void GasLineEmission::initializeAtomicModels()
+void GasLineEmission::initializeAtomicModels(const SimulationItem* item)
 {
     if (_atomicRegistry.ready) return;
 
@@ -1209,7 +1225,7 @@ void GasLineEmission::initializeAtomicModels()
     for (const auto& entry : table)
     {
         AtomicModel model;
-        loadAtomicModel(entry.name, {"e-"}, 20, model);
+        loadAtomicModel(item, entry.name, {"e-"}, 20, model);
         int slot = static_cast<int>(_atomicRegistry.models.size());
         _atomicRegistry.models.push_back(std::move(model));
         _atomicRegistry.modelNames.push_back(entry.name);
@@ -1300,7 +1316,7 @@ namespace
 
 //////////////////////////////////////////////////////////////////////
 
-int GasLineEmission::extendLineRegistry(const std::vector<SpeciesSpec>& species)
+int GasLineEmission::extendLineRegistry(const SimulationItem* item, const std::vector<SpeciesSpec>& species)
 {
     auto& registry = _registry;
     if (!_recombRegistry.ready || !_atomicRegistry.ready)
@@ -1318,14 +1334,20 @@ int GasLineEmission::extendLineRegistry(const std::vector<SpeciesSpec>& species)
             claimedTransitions.insert({_atomicRegistry.lineModel[k], _atomicRegistry.lineTransition[k]});
 
     int numAdded = 0;
+    int numModelsLoaded = 0;
 
     // recombination inventory: every table enumerated by the per-set wavelength index files
     for (const auto& set : _recombSets)
     {
-        std::ifstream index(FilePaths::resource(set.indexFile));
-        if (!index.is_open()) throw FATALERROR(std::string("Cannot open recombination index file: ") + set.indexFile);
+        // read the raw Angstrom value with no unit conversion (i.e. exactly as the old istream-based
+        // code did): the filename and the registry wavelength below both need the untouched value,
+        // and going through the "wavelength" quantity and back would round-trip it through the unit
+        // system's Angstrom<->SI conversion for no benefit, risking a last-bit mismatch that could
+        // flip the truncated integer used to build the filename
+        TextInFile index(item, set.indexFile, "recombination line wavelengths", true);
+        index.addColumn("Wavelength");
         double wavelengthA;
-        while (index >> wavelengthA)
+        while (index.readRow(wavelengthA))
         {
             std::string filename = set.prefix + std::to_string(static_cast<long long>(wavelengthA)) + "A_line.stab";
             if (!claimedFiles.insert(filename).second) continue;
@@ -1352,7 +1374,8 @@ int GasLineEmission::extendLineRegistry(const std::vector<SpeciesSpec>& species)
             if (!FilePaths::hasResource(spec.name + "_Mass.txt")) continue;
 
             AtomicModel model;
-            loadAtomicModel(spec.name, {"e-"}, 20, model);
+            loadAtomicModel(item, spec.name, {"e-"}, 20, model);
+            ++numModelsLoaded;
             slot = static_cast<int>(_atomicRegistry.models.size());
             _atomicRegistry.models.push_back(std::move(model));
             _atomicRegistry.modelNames.push_back(spec.name);
@@ -1369,6 +1392,9 @@ int GasLineEmission::extendLineRegistry(const std::vector<SpeciesSpec>& species)
             ++numAdded;
         }
     }
+
+    item->find<Log>()->info("Loaded " + std::to_string(numModelsLoaded)
+                            + " atomic models for the extended line registry");
     return numAdded;
 }
 

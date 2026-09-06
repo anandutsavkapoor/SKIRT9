@@ -425,144 +425,48 @@ void NonLTELineGasMix::setupSelfBefore()
     }
     _name = name;
 
-    // load the mass of the selected species
-    {
-        TextInFile infile(this, name + "_Mass.txt", "mass", true);
-        infile.addColumn("Mass", "mass", "amu");
-        double weight;
-        if (infile.readRow(weight)) _mass = weight;
-    }
+    // load the atomic model (mass, energy levels, radiative and collisional transitions) using the
+    // solver's shared loader; this issues no per-file log messages of its own (see loadAtomicModel()),
+    // so a single summary message is issued below instead
+    GasLineEmission::loadAtomicModel(this, name, colNames, numEnergyLevels(), _model);
+    auto log = find<Log>();
+    log->info("Loaded atomic model for " + name + " from " + std::to_string(3 + 2 * static_cast<int>(colNames.size()))
+              + " resource files");
 
-    // load the energy levels and weights
+    // copy the atomic data from the shared level-population solver's layout into this class's own layout
+    _mass = _model.mass;
+    _energy = _model.energy;
+    _weight = _model.weight;
+    _numLevels = static_cast<int>(_energy.size());
+    _indexUpRad = _model.indexUpRad;
+    _indexLowRad = _model.indexLowRad;
+    _einsteinA = _model.einsteinA;
+    _numLines = static_cast<int>(_indexUpRad.size());
+    _branchRatio = _model.branchRatio;
+    _einsteinBul = _model.einsteinBul;
+    _einsteinBlu = _model.einsteinBlu;
+    _center.resize(_model.center.size());
+    for (size_t k = 0; k != _model.center.size(); ++k) _center[k] = _model.center[k];
+    for (const auto& mp : _model.colPartner)
     {
-        TextInFile infile(this, name + "_Energy.txt", "energy levels", true);
-        infile.addColumn("Energy", "energy", "1/cm");
-        infile.addColumn("Weight");
-        double energy, weight;
-        while (infile.readRow(energy, weight))
-        {
-            _energy.push_back(energy);
-            _weight.push_back(weight);
-            if (_energy.size() == static_cast<size_t>(numEnergyLevels())) break;
-        }
-        _numLevels = _energy.size();
-    }
-
-    // load the radiative transitions
-    {
-        TextInFile infile(this, name + "_Rad_Coeff.txt", "radiative transitions", true);
-        infile.addColumn("Up index");
-        infile.addColumn("Low index");
-        infile.addColumn("Einstein A", "transitionrate", "1/s");
-        double up, low, rate;
-        while (infile.readRow(up, low, rate))
-        {
-            int indexUp = up;
-            int indexLow = low;
-            if (indexUp < _numLevels && indexLow < _numLevels)
-            {
-                _indexUpRad.push_back(indexUp);
-                _indexLowRad.push_back(indexLow);
-                _einsteinA.push_back(rate);
-            }
-        }
-    }
-    _numLines = _indexUpRad.size();
-
-    // calculate the branching ratios for each radiative transition from the same upper energy level
-    _branchRatio.resize(_numLines);
-    vector<double> sumA(_numLevels, 0.);
-
-    for (int k = 0; k != _numLines; ++k)
-    {
-        int indexUp = _indexUpRad[k];
-        sumA[indexUp] += _einsteinA[k];
-    }
-
-    for (int k = 0; k != _numLines; ++k)
-    {
-        int indexUp = _indexUpRad[k];
-        if (sumA[indexUp] > 0.)
-            _branchRatio[k] = _einsteinA[k] / sumA[indexUp];
-        else
-            _branchRatio[k] = 0.;
-    }
-
-    // calculate the line centers and the Einstein B coefficients
-    _center.resize(_numLines);
-    _einsteinBul.resize(_numLines);
-    _einsteinBlu.resize(_numLines);
-    for (int k = 0; k != _numLines; ++k)
-    {
-        _center[k] = Constants::h() * Constants::c() / (_energy[_indexUpRad[k]] - _energy[_indexLowRad[k]]);
-        _einsteinBul[k] = _einsteinA[k] * pow(_center[k], 5.) / (2. * Constants::h() * Constants::c() * Constants::c());
-        _einsteinBlu[k] = _einsteinBul[k] * _weight[_indexUpRad[k]] / _weight[_indexLowRad[k]];
-    }
-
-    // load the collisional transitions for each interaction partner
-    for (const auto& colName : colNames)
-    {
-        // add a new empty data structure and get a writable reference to it
         _colPartner.emplace_back();
         auto& partner = _colPartner.back();
-        partner.name = colName;
-
-        // load the temperature grid points
+        partner.name = mp.name;
+        partner.T.resize(mp.T.size());
+        for (size_t i = 0; i != mp.T.size(); ++i) partner.T[i] = mp.T[i];
+        partner.indexUpCol = mp.indexUpCol;
+        partner.indexLowCol = mp.indexLowCol;
+        for (const auto& coeff : mp.Kul)
         {
-            TextInFile infile(this, name + "_Col_" + colName + "_Temp.txt", "temperature grid", true);
-            infile.addColumn("Temperature", "temperature", "K");
-            infile.readAllColumns(partner.T);
+            Array a(coeff.size());
+            for (size_t i = 0; i != coeff.size(); ++i) a[i] = coeff[i];
+            partner.Kul.push_back(std::move(a));
         }
-
-        // load the transition indices and coefficients
-        {
-            int numTemperatures = partner.T.size();
-            TextInFile infile(this, name + "_Col_" + colName + "_Coeff.txt", "collisional transitions", true);
-            infile.addColumn("Up index");
-            infile.addColumn("Low index");
-            for (int i = 0; i != numTemperatures; ++i) infile.addColumn("Collisional K", "collisionalrate", "cm3/s");
-            Array row;
-            while (infile.readRow(row))
-            {
-                int indexUp = row[0];
-                int indexLow = row[1];
-                if (indexUp < _numLevels && indexLow < _numLevels)
-                {
-                    partner.indexUpCol.push_back(indexUp);
-                    partner.indexLowCol.push_back(indexLow);
-                    Array coeff(numTemperatures);
-                    for (int i = 0; i != numTemperatures; ++i) coeff[i] = row[i + 2];
-                    partner.Kul.emplace_back(coeff);
-                }
-            }
-        }
-        partner.numColTrans = partner.indexUpCol.size();
+        partner.numColTrans = static_cast<int>(partner.indexUpCol.size());
     }
-    _numColPartners = colNames.size();
-
-    // copy the atomic data into the layout used by the shared level-population solver
-    _model.mass = _mass;
-    _model.energy = _energy;
-    _model.weight = _weight;
-    _model.indexUpRad = _indexUpRad;
-    _model.indexLowRad = _indexLowRad;
-    _model.einsteinA = _einsteinA;
-    _model.einsteinBul = _einsteinBul;
-    _model.einsteinBlu = _einsteinBlu;
-    _model.center.assign(begin(_center), end(_center));
-    for (const auto& partner : _colPartner)
-    {
-        _model.colPartner.emplace_back();
-        auto& mp = _model.colPartner.back();
-        mp.name = partner.name;
-        mp.T.assign(begin(partner.T), end(partner.T));
-        mp.indexUpCol = partner.indexUpCol;
-        mp.indexLowCol = partner.indexLowCol;
-        for (const auto& coeff : partner.Kul) mp.Kul.emplace_back(begin(coeff), end(coeff));
-    }
+    _numColPartners = static_cast<int>(colNames.size());
 
     // log summary info on the radiative lines
-    auto log = find<Log>();
     auto units = find<Units>();
     log->info("Radiative lines for " + name + ":");
     if (_numLines == 0) throw FATALERROR("There are no radiative transitions; increase the number of energy levels");

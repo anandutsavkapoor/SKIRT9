@@ -350,7 +350,7 @@ void DiffuseIonizedGasMix::setupSelfBefore()
         // built-in registry only) stay reachable and testable on their own.
         if (includeExtendedLines())
         {
-            _gasLineEmission.initializeAtomicModels();
+            _gasLineEmission.initializeAtomicModels(this);
             find<Log>()->info("Collisional line emission uses the statistical-equilibrium solver");
 
             _gasLineEmission.initializeRecombinationTables(this);
@@ -367,7 +367,7 @@ void DiffuseIonizedGasMix::setupSelfBefore()
                     species.push_back(
                         {string(metals[e]) + "_" + romans[s - 1], PhotoIonizationSolver::stageOffset[elem] + s - 1, e});
             }
-            int numAdded = _gasLineEmission.extendLineRegistry(species);
+            int numAdded = _gasLineEmission.extendLineRegistry(this, species);
             find<Log>()->info("Added " + std::to_string(numAdded) + " lines to the line registry");
         }
         else
