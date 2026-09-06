@@ -11,6 +11,7 @@
 #include "GasLineEmission.hpp"
 #include "Log.hpp"
 #include "MaterialState.hpp"
+#include "NR.hpp"
 #include "StringUtils.hpp"
 #include "TextInFile.hpp"
 #include "Units.hpp"
@@ -430,60 +431,30 @@ void NonLTELineGasMix::setupSelfBefore()
     // so a single summary message is issued below instead
     GasLineEmission::loadAtomicModel(this, name, colNames, numEnergyLevels(), _model);
     auto log = find<Log>();
-    log->info("Loaded atomic model for " + name + " from " + std::to_string(3 + 2 * static_cast<int>(colNames.size()))
+    log->info("Loaded atomic model for " + name + " from " + std::to_string(3 + 2 * colNames.size())
               + " resource files");
-
-    // copy the atomic data from the shared level-population solver's layout into this class's own layout
-    _mass = _model.mass;
-    _energy = _model.energy;
-    _weight = _model.weight;
-    _numLevels = static_cast<int>(_energy.size());
-    _indexUpRad = _model.indexUpRad;
-    _indexLowRad = _model.indexLowRad;
-    _einsteinA = _model.einsteinA;
-    _numLines = static_cast<int>(_indexUpRad.size());
-    _branchRatio = _model.branchRatio;
-    _einsteinBul = _model.einsteinBul;
-    _einsteinBlu = _model.einsteinBlu;
-    _center.resize(_model.center.size());
-    for (size_t k = 0; k != _model.center.size(); ++k) _center[k] = _model.center[k];
-    for (const auto& mp : _model.colPartner)
-    {
-        _colPartner.emplace_back();
-        auto& partner = _colPartner.back();
-        partner.name = mp.name;
-        partner.T.resize(mp.T.size());
-        for (size_t i = 0; i != mp.T.size(); ++i) partner.T[i] = mp.T[i];
-        partner.indexUpCol = mp.indexUpCol;
-        partner.indexLowCol = mp.indexLowCol;
-        for (const auto& coeff : mp.Kul)
-        {
-            Array a(coeff.size());
-            for (size_t i = 0; i != coeff.size(); ++i) a[i] = coeff[i];
-            partner.Kul.push_back(std::move(a));
-        }
-        partner.numColTrans = static_cast<int>(partner.indexUpCol.size());
-    }
-    _numColPartners = static_cast<int>(colNames.size());
 
     // log summary info on the radiative lines
     auto units = find<Units>();
+    int numLines = _model.numLines();
     log->info("Radiative lines for " + name + ":");
-    if (_numLines == 0) throw FATALERROR("There are no radiative transitions; increase the number of energy levels");
-    for (int k = 0; k != _numLines; ++k)
+    if (numLines == 0) throw FATALERROR("There are no radiative transitions; increase the number of energy levels");
+    for (int k = 0; k != numLines; ++k)
     {
-        if (_branchRatio[k] > lowestBranchingRatio() && _indexUpRad[k] < maxUpperLevelForRadiation())
+        if (_model.branchRatio[k] > lowestBranchingRatio() && _model.indexUpRad[k] < maxUpperLevelForRadiation())
         {
-            log->info("  (" + StringUtils::toString(_indexUpRad[k]) + "-" + StringUtils::toString(_indexLowRad[k])
-                      + ") " + StringUtils::toString(units->owavelength(_center[k])) + " " + units->uwavelength()
-                      + ", branch ratio=" + StringUtils::toString(_branchRatio[k]) + ">"
+            log->info("  (" + StringUtils::toString(_model.indexUpRad[k]) + "-"
+                      + StringUtils::toString(_model.indexLowRad[k]) + ") "
+                      + StringUtils::toString(units->owavelength(_model.center[k])) + " " + units->uwavelength()
+                      + ", branch ratio=" + StringUtils::toString(_model.branchRatio[k]) + ">"
                       + StringUtils::toString(lowestBranchingRatio()) + ": radiative transition included");
         }
         else
         {
-            log->info("  (" + StringUtils::toString(_indexUpRad[k]) + "-" + StringUtils::toString(_indexLowRad[k])
-                      + ") " + StringUtils::toString(units->owavelength(_center[k])) + " " + units->uwavelength()
-                      + ", branch ratio=" + StringUtils::toString(_branchRatio[k]) + "<"
+            log->info("  (" + StringUtils::toString(_model.indexUpRad[k]) + "-"
+                      + StringUtils::toString(_model.indexLowRad[k]) + ") "
+                      + StringUtils::toString(units->owavelength(_model.center[k])) + " " + units->uwavelength()
+                      + ", branch ratio=" + StringUtils::toString(_model.branchRatio[k]) + "<"
                       + StringUtils::toString(lowestBranchingRatio()) + ": radiative transition excluded");
         }
     }
@@ -497,14 +468,14 @@ void NonLTELineGasMix::setupSelfBefore()
     if (rfwlg)
     {
         rfwlg->setup();
-        for (int k = 0; k != _numLines; ++k)
+        for (int k = 0; k != numLines; ++k)
         {
-            if (_branchRatio[k] > lowestBranchingRatio() && _indexUpRad[k] < maxUpperLevelForRadiation())
+            if (_model.branchRatio[k] > lowestBranchingRatio() && _model.indexUpRad[k] < maxUpperLevelForRadiation())
             {
-                if (rfwlg->bin(_center[k]) < 0)
+                if (rfwlg->bin(_model.center[k]) < 0)
                     throw FATALERROR("Radiation field wavelength grid does not cover the central line for transition ("
-                                     + StringUtils::toString(_indexUpRad[k]) + "-"
-                                     + StringUtils::toString(_indexLowRad[k]) + ")");
+                                     + StringUtils::toString(_model.indexUpRad[k]) + "-"
+                                     + StringUtils::toString(_model.indexLowRad[k]) + ")");
             }
         }
         _numWavelengths = rfwlg->numBins();
@@ -517,7 +488,7 @@ void NonLTELineGasMix::setupSelfBefore()
     {
         TextInFile infile(this, initialLevelPopsFilename(), "initial level populations");
         infile.addColumn("cell index");
-        for (int p = 0; p != _numLevels; ++p)
+        for (int p = 0; p != _model.numLevels(); ++p)
             infile.addColumn("population of level " + std::to_string(p), "numbervolumedensity", "1/cm3");
         _initLevelPops = infile.readAllRows();
     }
@@ -558,7 +529,7 @@ vector<SnapshotParameter> NonLTELineGasMix::parameterInfo() const
     vector<SnapshotParameter> result;
 
     // add the number density of each collisional partner
-    for (const auto& partner : _colPartner)
+    for (const auto& partner : _model.colPartner)
         result.push_back(SnapshotParameter::custom(partner.name + " number density", "numbervolumedensity", "1/cm3"));
 
     // add the turbulence velocity
@@ -584,12 +555,12 @@ vector<StateVariable> NonLTELineGasMix::specificStateVariableInfo() const
 
     // add custom variable for the number density of each collisional partner
     const_cast<NonLTELineGasMix*>(this)->_indexFirstColPartnerDensity = index;
-    for (const auto& partner : _colPartner)
+    for (const auto& partner : _model.colPartner)
         result.push_back(StateVariable::custom(index++, partner.name + " number density", "numbervolumedensity"));
 
     // add custom variable for the population of each energy level
     const_cast<NonLTELineGasMix*>(this)->_indexFirstLevelPopulation = index;
-    for (int p = 0; p != _numLevels; ++p)
+    for (int p = 0; p != _model.numLevels(); ++p)
         result.push_back(
             StateVariable::custom(index++, "population of level " + std::to_string(p), "numbervolumedensity"));
 
@@ -597,7 +568,7 @@ vector<StateVariable> NonLTELineGasMix::specificStateVariableInfo() const
     if (storeMeanIntensities())
     {
         const_cast<NonLTELineGasMix*>(this)->_indexFirstMeanIntensity = index;
-        for (int k = 0; k != _numLines; ++k)
+        for (int k = 0; k != _model.numLines(); ++k)
             result.push_back(StateVariable::custom(index++, "mean intensity at line " + std::to_string(k),
                                                    "wavelengthmeanintensity"));
     }
@@ -624,36 +595,40 @@ void NonLTELineGasMix::initializeSpecificState(MaterialState* state, double /*me
     // if the cell does not contain any material for this component, leave all properties at zero values
     if (state->numberDensity() > 0.)
     {
+        int numColPartners = _model.numColPartners();
+        int numLevels = _model.numLevels();
+
         // copy kinetic temperature from import or default
         double Tkin = temperature >= 0. ? temperature : defaultTemperature();
         state->setKineticTemperature(Tkin);
 
         // set effective temperature, including imported or default turbulence
-        double vturb = params.size() ? params[_numColPartners] : defaultTurbulenceVelocity();
-        double Teff = Tkin + 0.5 * vturb * vturb * _mass / Constants::k();
+        double vturb = params.size() ? params[numColPartners] : defaultTurbulenceVelocity();
+        double Teff = Tkin + 0.5 * vturb * vturb * _model.mass / Constants::k();
         state->setTemperature(Teff);
 
         // copy collisional partner densities from import or default
         if (params.size())
         {
-            for (int c = 0; c != _numColPartners; ++c) state->setColPartnerDensity(c, params[c]);
+            for (int c = 0; c != numColPartners; ++c) state->setColPartnerDensity(c, params[c]);
         }
         else
         {
             const auto& ratios = defaultCollisionPartnerRatios();
-            if (ratios.size() < _colPartner.size())
+            if (static_cast<int>(ratios.size()) < numColPartners)
                 throw FATALERROR("The number of collision partners exceeds the number of default ratios");
-            for (int c = 0; c != _numColPartners; ++c)
+            for (int c = 0; c != numColPartners; ++c)
                 state->setColPartnerDensity(c, state->numberDensity() * ratios[c]);
         }
 
         // initialize level population using boltzmann distribution (i.e., start with LTE)
-        auto initLTE = [this, Tkin, state]() {
-            Array levelPops(_numLevels);
-            for (int p = 0; p != _numLevels; ++p) levelPops[p] = _weight[p] * exp(-_energy[p] / Constants::k() / Tkin);
+        auto initLTE = [this, Tkin, state, numLevels]() {
+            Array levelPops(numLevels);
+            for (int p = 0; p != numLevels; ++p)
+                levelPops[p] = _model.weight[p] * exp(-_model.energy[p] / Constants::k() / Tkin);
             // normalize and store
             levelPops *= state->numberDensity() / levelPops.sum();
-            for (int p = 0; p != _numLevels; ++p) state->setLevelPopulation(p, levelPops[p]);
+            for (int p = 0; p != numLevels; ++p) state->setLevelPopulation(p, levelPops[p]);
         };
 
         if (initialLevelPopsCase() == InitialLevelPopsCase::LTE)
@@ -676,11 +651,11 @@ void NonLTELineGasMix::initializeSpecificState(MaterialState* state, double /*me
             size_t m = state->cellIndex();
             if (m < _initLevelPops.size())
             {
-                Array levelPops(_numLevels);
-                for (int p = 0; p != _numLevels; ++p) levelPops[p] = _initLevelPops[m][p + 1];
+                Array levelPops(numLevels);
+                for (int p = 0; p != numLevels; ++p) levelPops[p] = _initLevelPops[m][p + 1];
                 // normalize and store
                 levelPops *= state->numberDensity() / levelPops.sum();
-                for (int p = 0; p != _numLevels; ++p) state->setLevelPopulation(p, levelPops[p]);
+                for (int p = 0; p != numLevels; ++p) state->setLevelPopulation(p, levelPops[p]);
             }
             else
             {
@@ -756,9 +731,12 @@ double NonLTELineGasMix::solveLevelPopulations(MaterialState* state, const Array
     GasLineEmission::Environment env;
     env.Tkin = state->kineticTemperature();
     env.nTotal = state->numberDensity();
-    env.nPartner.resize(_numColPartners);
-    for (int c = 0; c != _numColPartners; ++c) env.nPartner[c] = state->colPartnerDensity(c);
-    env.meanJ.assign(_numLines, 0.);
+    int numColPartners = _model.numColPartners();
+    int numLines = _model.numLines();
+    int numLevels = _model.numLevels();
+    env.nPartner.resize(numColPartners);
+    for (int c = 0; c != numColPartners; ++c) env.nPartner[c] = state->colPartnerDensity(c);
+    env.meanJ.assign(numLines, 0.);
     {
         auto log = find<Log>();
         env.warn = [log](const std::string& message) { log->warning(message); };
@@ -769,20 +747,20 @@ double NonLTELineGasMix::solveLevelPopulations(MaterialState* state, const Array
     //   J_convolved = \int J_lambda(lambda) g(lambda) d lambda  /  \int g(lambda) d lambda
     // all wavelength points within a given range around the line center are used, and the grid is
     // verified to be fine enough to reproduce the normalization 1 = \int g(lambda) d lambda
-    for (int k = 0; k != _numLines; ++k)
+    for (int k = 0; k != numLines; ++k)
     {
-        int up = _indexUpRad[k];
-        int low = _indexLowRad[k];
+        int up = _model.indexUpRad[k];
+        int low = _model.indexLowRad[k];
 
         // ignore radiative transitions from high upper levels.
         if (up >= maxUpperLevelForRadiation()) continue;
 
         // ignore radiative transitions with a branching ratio below the threshold
-        if (_branchRatio[k] < lowestBranchingRatio()) continue;
+        if (_model.branchRatio[k] < lowestBranchingRatio()) continue;
 
         auto log = find<Log>();
-        double center = _center[k];
-        double sigma = sigmaForLine(center, state->temperature(), _mass);
+        double center = _model.center[k];
+        double sigma = sigmaForLine(center, state->temperature(), _model.mass);
         double lambdamin = center - PROFILE_RANGE * sigma;
         double lambdamax = center + PROFILE_RANGE * sigma;
         int ellmin = std::lower_bound(begin(_lambdav), end(_lambdav), lambdamin) - begin(_lambdav);
@@ -840,8 +818,8 @@ double NonLTELineGasMix::solveLevelPopulations(MaterialState* state, const Array
         {
             throw FATALERROR("Mean intensity J is not finite for transition (" + StringUtils::toString(up) + "-"
                              + StringUtils::toString(low) + ") of " + _name + "The value of J is "
-                             + StringUtils::toString(J) + ". The line center is " + StringUtils::toString(_center[k])
-                             + ".");
+                             + StringUtils::toString(J) + ". The line center is "
+                             + StringUtils::toString(_model.center[k]) + ".");
         }
 
         env.meanJ[k] = J;
@@ -855,14 +833,14 @@ double NonLTELineGasMix::solveLevelPopulations(MaterialState* state, const Array
 
     // update the level populations, keeping track of the amount of change
     double change = 0.;
-    for (int p = 0; p != _numLevels; ++p)
+    for (int p = 0; p != numLevels; ++p)
     {
         double oldPop = state->levelPopulation(p);
         double newPop = solution[p];
         state->setLevelPopulation(p, newPop);
         change += abs(oldPop / newPop - 1.);
     }
-    return change / _numLevels;
+    return change / numLevels;
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -881,7 +859,7 @@ bool NonLTELineGasMix::isSpecificStateConverged(int numCells, int /*numUpdated*/
 
         // calculate maximum relative difference between level populations of previous and current iteration
         double changeInGlobalLevelPops = 0.;
-        for (int p = 0; p != _numLevels; ++p)
+        for (int p = 0; p != _model.numLevels(); ++p)
         {
             double currentPop = currentAggregate->levelPopulation(p);
             double previousPop = previousAggregate->levelPopulation(p);
@@ -910,7 +888,7 @@ bool NonLTELineGasMix::isSpecificStateConverged(int numCells, int /*numUpdated*/
 
 double NonLTELineGasMix::mass() const
 {
-    return _mass;
+    return _model.mass;
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -944,21 +922,21 @@ double NonLTELineGasMix::opacityAbs(double lambda, const MaterialState* state, c
     if (state->numberDensity() > 0.)
     {
         // accumulate the opacities for all radiational transitions
-        for (int k = 0; k != _numLines; ++k)
+        for (int k = 0; k != _model.numLines(); ++k)
         {
-            if (_branchRatio[k] < lowestBranchingRatio()) continue;
-            double center = _center[k];
-            double sigma = sigmaForLine(center, state->temperature(), _mass);
+            if (_model.branchRatio[k] < lowestBranchingRatio()) continue;
+            double center = _model.center[k];
+            double sigma = sigmaForLine(center, state->temperature(), _model.mass);
             Range range(center - PROFILE_RANGE * sigma, center + PROFILE_RANGE * sigma);
 
             // calculate opacity only if the requested wavelength is in the line profile range
             if (range.contains(lambda))
             {
-                int up = _indexUpRad[k];
-                int low = _indexLowRad[k];
+                int up = _model.indexUpRad[k];
+                int low = _model.indexLowRad[k];
                 double upnumber = state->levelPopulation(up);
                 double lownumber = state->levelPopulation(low);
-                double transrate = lownumber * _einsteinBlu[k] - upnumber * _einsteinBul[k];
+                double transrate = lownumber * _model.einsteinBlu[k] - upnumber * _model.einsteinBul[k];
                 if (transrate != 0. && up < maxUpperLevelForRadiation())
                 {
                     constexpr double front = Constants::h() * Constants::c() / 4. / M_PI;
@@ -1009,15 +987,15 @@ void NonLTELineGasMix::performScattering(double /*lambda*/, const MaterialState*
 
 Array NonLTELineGasMix::lineEmissionCenters() const
 {
-    return _center;
+    return NR::array(_model.center);
 }
 
 ////////////////////////////////////////////////////////////////////
 
 Array NonLTELineGasMix::lineEmissionMasses() const
 {
-    Array masses(_numLines);
-    for (int k = 0; k != _numLines; ++k) masses[k] = _mass;
+    Array masses(_model.numLines());
+    for (int k = 0; k != _model.numLines(); ++k) masses[k] = _model.mass;
     return masses;
 }
 
@@ -1025,20 +1003,20 @@ Array NonLTELineGasMix::lineEmissionMasses() const
 
 Array NonLTELineGasMix::lineEmissionSpectrum(const MaterialState* state, const Array& /*Jv*/) const
 {
-    Array luminosities(_numLines);
+    Array luminosities(_model.numLines());
     if (state->numberDensity() > 0.)
     {
         double front = Constants::h() * Constants::c() * state->volume();
-        for (int k = 0; k != _numLines; ++k)
+        for (int k = 0; k != _model.numLines(); ++k)
         {
-            int up = _indexUpRad[k];
-            if (_branchRatio[k] < lowestBranchingRatio() || up >= maxUpperLevelForRadiation())
+            int up = _model.indexUpRad[k];
+            if (_model.branchRatio[k] < lowestBranchingRatio() || up >= maxUpperLevelForRadiation())
             {
                 luminosities[k] = 0.;
             }
             else
             {
-                luminosities[k] = front / _center[k] * _einsteinA[k] * state->levelPopulation(_indexUpRad[k]);
+                luminosities[k] = front / _model.center[k] * _model.einsteinA[k] * state->levelPopulation(up);
             }
         }
     }

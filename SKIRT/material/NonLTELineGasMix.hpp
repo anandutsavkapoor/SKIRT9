@@ -749,41 +749,12 @@ public:
 
 private:
     // Data members loaded from text resource files and/or precalculated in setupSelfBefore()
-    // (only the energy levels and transitions actually used are stored in the data members)
 
     string _name;  // human readable species name
 
-    // mass
-    double _mass{0.};  // particle mass for the species under consideration
-
-    // energy levels
-    int _numLevels{0};       // the number of energy levels -- index p
-    vector<double> _energy;  // the energy of each energy level
-    vector<double> _weight;  // the weight (degeneracy) of each energy level
-
-    // radiative transitions
-    int _numLines{0};             // the number of radiative transitions -- index k
-    vector<int> _indexUpRad;      // the upper energy level index for each radiative transition
-    vector<int> _indexLowRad;     // the lower energy level index for each radiative transition
-    vector<double> _einsteinA;    // the Einstein A coefficient for each radiative transition
-    vector<double> _einsteinBul;  // the Einstein Bul coefficient for each radiative transition
-    vector<double> _einsteinBlu;  // the Einstein Blu coefficient for each radiative transition
-    vector<double> _branchRatio;  // the branching ratio for each radiative transition from the same upper energy level
-    Array _center;                // the central emission wavelength for each radiative transition
-
-    // collisional transitions
-    struct ColPartner  // data structure holding information on a collisional partner
-    {
-        string name;              // human readable species name
-        Array T;                  // the temperature grid points
-        int numColTrans{0};       // the number of collisional transitions -- index t
-        vector<int> indexUpCol;   // the upper energy level index for each collisional transition
-        vector<int> indexLowCol;  // the lower energy level index for each collisional transition
-        vector<Array> Kul;        // the coefficient for each collisional transition and for each temperature
-    };
-    int _numColPartners{0};               // the number of collisional interaction partners -- index c
-    vector<ColPartner> _colPartner;       // the data for each collisional partner
-    GasLineEmission::AtomicModel _model;  // the same data in the shared level-population solver's layout
+    // mass, energy levels, and radiative and collisional transitions, in the shared
+    // level-population solver's layout (see GasLineEmission::AtomicModel)
+    GasLineEmission::AtomicModel _model;
 
     // the radiation field wavelength grid for this simulation
     int _numWavelengths{0};  // the number of wavelength bins -- index ell

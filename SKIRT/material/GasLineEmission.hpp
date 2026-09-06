@@ -6,8 +6,6 @@
 #ifndef GASLINEEMISSION_HPP
 #define GASLINEEMISSION_HPP
 
-#include "Basics.hpp"
-#include "StoredTable.hpp"
 #include "StoredTableDictionary.hpp"
 #include <functional>
 class SimulationItem;
@@ -219,8 +217,9 @@ public:
         };
         std::vector<ColPartner> colPartner;
 
-        int numLevels() const { return static_cast<int>(energy.size()); }
-        int numLines() const { return static_cast<int>(einsteinA.size()); }
+        int numLevels() const { return energy.size(); }
+        int numLines() const { return einsteinA.size(); }
+        int numColPartners() const { return colPartner.size(); }
     };
 
     /** Per-cell inputs for solveLevelPopulations(). An empty meanJ skips radiative pumping. The
