@@ -350,10 +350,10 @@ void DiffuseIonizedGasMix::setupSelfBefore()
         // built-in registry only) stay reachable and testable on their own.
         if (includeExtendedLines())
         {
-            GasLineEmission::initializeAtomicModels();
+            _gasLineEmission.initializeAtomicModels();
             find<Log>()->info("Collisional line emission uses the statistical-equilibrium solver");
 
-            GasLineEmission::initializeRecombinationTables(this);
+            _gasLineEmission.initializeRecombinationTables(this);
             find<Log>()->info("Recombination line emission uses the Case B emissivity tables");
 
             static const char* romans[] = {"I", "II", "III", "IV",   "V",   "VI", "VII", "VIII", "IX",
@@ -367,7 +367,7 @@ void DiffuseIonizedGasMix::setupSelfBefore()
                     species.push_back(
                         {string(metals[e]) + "_" + romans[s - 1], PhotoIonizationSolver::stageOffset[elem] + s - 1, e});
             }
-            int numAdded = GasLineEmission::extendLineRegistry(species);
+            int numAdded = _gasLineEmission.extendLineRegistry(species);
             find<Log>()->info("Added " + std::to_string(numAdded) + " lines to the line registry");
         }
         else
@@ -377,7 +377,7 @@ void DiffuseIonizedGasMix::setupSelfBefore()
         }
 
         // select the active lines from the registry (see _activeLines)
-        const auto& registry = GasLineEmission::lineRegistry();
+        const auto& registry = _gasLineEmission.lineRegistry();
         const Array& emLambdav = _emissionWavelengthGrid->lambdav();
         double emLambdaMin = emLambdav[0];
         double emLambdaMax = emLambdav[emLambdav.size() - 1];
@@ -402,9 +402,9 @@ void DiffuseIonizedGasMix::setupSelfBefore()
         _lineGroup.assign(_numLines, -1);
         for (int i = 0; i < _numLines; ++i)
         {
-            int slot = GasLineEmission::lineModelSlot(_activeLines[i]);
+            int slot = _gasLineEmission.lineModelSlot(_activeLines[i]);
             if (slot < 0) continue;
-            _lineTransitions[i] = GasLineEmission::lineTransition(_activeLines[i]);
+            _lineTransitions[i] = _gasLineEmission.lineTransition(_activeLines[i]);
             auto it = std::find(_groupSlots.begin(), _groupSlots.end(), slot);
             if (it == _groupSlots.end())
             {
@@ -1274,7 +1274,7 @@ Array DiffuseIonizedGasMix::lineEmissionSpectrum(const MaterialState* state, con
     double gamma[PhotoIonizationSolver::totalStages];
     _emissionSolver.computePhotoionizationRates(Jv, gamma);
     double gammaHI = gamma[0];
-    const auto& registry = GasLineEmission::lineRegistry();
+    const auto& registry = _gasLineEmission.lineRegistry();
 
     // collisional lines served by an atomic model: one level-population solve per species,
     // in the nebular limit (electron collisions at T and ne, no radiative pumping)
@@ -1286,8 +1286,8 @@ Array DiffuseIonizedGasMix::lineEmissionSpectrum(const MaterialState* state, con
         env.Tkin = T;
         env.nTotal = nIon * 1e6;    // cm^-3 -> m^-3
         env.nPartner = {ne * 1e6};  // cm^-3 -> m^-3
-        auto pops = GasLineEmission::solveLevelPopulations(GasLineEmission::atomicModel(_groupSlots[g]), env);
-        auto eps = GasLineEmission::lineEmissivities(GasLineEmission::atomicModel(_groupSlots[g]), pops);
+        auto pops = GasLineEmission::solveLevelPopulations(_gasLineEmission.atomicModel(_groupSlots[g]), env);
+        auto eps = GasLineEmission::lineEmissivities(_gasLineEmission.atomicModel(_groupSlots[g]), pops);
         for (int i : _groupLines[g]) luminosities[i] = eps[_lineTransitions[i]] * V_cm3 * 1e-6;  // W m^-3 x m^3
     }
 
@@ -1301,12 +1301,12 @@ Array DiffuseIonizedGasMix::lineEmissionSpectrum(const MaterialState* state, con
         if (line.carrierIonIndex >= 0)
         {
             double nIon = nH * metalAbundances[line.elementIndex] * result.ionFracs[line.carrierIonIndex];
-            luminosities[i] = GasLineEmission::collisionalLineLuminosity(k, T, ne, nIon, V_cm3);
+            luminosities[i] = _gasLineEmission.collisionalLineLuminosity(k, T, ne, nIon, V_cm3);
         }
         else
         {
             double nIon = line.isHeIRecomb ? nHeII : (line.isHeIIRecomb ? nHeIII : nHII);
-            luminosities[i] = GasLineEmission::recombinationLineLuminosity(k, T, ne, nIon, gammaHI, nHI, V_cm3);
+            luminosities[i] = _gasLineEmission.recombinationLineLuminosity(k, T, ne, nIon, gammaHI, nHI, V_cm3);
         }
     }
 

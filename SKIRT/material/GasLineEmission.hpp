@@ -7,13 +7,15 @@
 #define GASLINEEMISSION_HPP
 
 #include "Basics.hpp"
+#include "StoredTable.hpp"
+#include "StoredTableDictionary.hpp"
 #include <functional>
 class SimulationItem;
 
 //////////////////////////////////////////////////////////////////////
 
-/** GasLineEmission provides static, species-agnostic building blocks for gas line emission,
-    shared by the material mixes:
+/** GasLineEmission provides species-agnostic building blocks for gas line emission, shared by the
+    material mixes:
 
     - Line inventory: 26 built-in lines (H and He recombination lines, optical forbidden metal
       lines) indexed by LineIndex, plus the extended inventory appended at setup by
@@ -33,10 +35,34 @@ class SimulationItem;
       implementation (Matsumoto et al. 2023) and is shared by NonLTELineGasMix and
       DiffuseIonizedGasMix.
 
-    Only the public entry points are exposed; tables, registries and helpers are file-local. */
+    Functions that are pure computations on their arguments (hydrogenLineLuminosity(),
+    loadAtomicModel(), solveLevelPopulations(), lineEmissivities()) remain static and need no
+    instance. Everything else reads or writes one of this class's three registries (the line
+    registry itself, the Case B emissivity-table registry, and the atomic-model registry) and is
+    therefore instance state: each consumer that calls initializeRecombinationTables(),
+    initializeAtomicModels() or extendLineRegistry() owns its own GasLineEmission instance. This
+    also means these registries, and the resources they hold open (the Case B
+    StoredTableDictionary and the StoredTable instances spawned from it), are released
+    deterministically when that owning instance is destroyed, rather than at unspecified static
+    destruction order. */
 class GasLineEmission final
 {
 public:
+    /** The constructor initializes the line registry with the built-in lines (the first numLines
+        entries, in LineIndex order); the extended inventory is empty until extendLineRegistry()
+        is called. */
+    GasLineEmission();
+
+    /** The destructor releases any resources acquired by initializeRecombinationTables() (the
+        Case B StoredTableDictionary and the StoredTable instances spawned from it). */
+    ~GasLineEmission();
+
+    /** The copy constructor and copy assignment operator are deleted because an instance may own
+        open resources (see initializeRecombinationTables()) that cannot be meaningfully shared by
+        naive member-wise copying. */
+    GasLineEmission(const GasLineEmission&) = delete;
+    GasLineEmission& operator=(const GasLineEmission&) = delete;
+
     // ============== Line inventory ==============
 
     // Line indices for the emission line array
@@ -90,7 +116,7 @@ public:
 
     /** The line registry: the first numLines entries are the built-in lines (LineIndex order),
         followed by any lines added by extendLineRegistry(). */
-    static const std::vector<LineDef>& lineRegistry();
+    const std::vector<LineDef>& lineRegistry() const;
 
     /** One atomic species for the extended inventory: resource base name (e.g. "N_II") plus the
         consumer's carrier indices. */
@@ -106,7 +132,7 @@ public:
         absent species are skipped; built-in lines are not duplicated). Requires
         initializeRecombinationTables() and initializeAtomicModels() to have completed (throws
         FatalError otherwise). Idempotent. Returns the number of lines added. */
-    static int extendLineRegistry(const std::vector<SpeciesSpec>& species);
+    int extendLineRegistry(const std::vector<SpeciesSpec>& species);
 
     // Rest-frame wavelengths [m]
     static constexpr double lineWavelengths[numLines] = {
@@ -211,19 +237,19 @@ public:
         the emissivity tables when loaded, else the legacy form for H (which uses gammaHI, nHI) and
         zero for He. nIon is the recombining ion density (H II, He II or He III). Densities in
         cm^-3, volume in cm^3. */
-    static double recombinationLineLuminosity(int lineIdx, double T, double ne, double nIon, double gammaHI, double nHI,
-                                              double V_cm3);
+    double recombinationLineLuminosity(int lineIdx, double T, double ne, double nIon, double gammaHI, double nHI,
+                                       double V_cm3) const;
 
     /** Loads the Case B emissivity tables (StoredTable, resolved via FilePaths::resource()) and
-        keeps the resulting StoredTable instances open for the lifetime of the program (they are
-        memory-mapped, so this holds no data in memory beyond what is actually looked up). The item
-        argument is passed through to StoredTable::open() for each table (used only to retrieve a
-        logger; not otherwise a SimulationItem in this hierarchy). Idempotent; throws FatalError on
-        a missing or malformed file. */
-    static void initializeRecombinationTables(const SimulationItem* item);
+        keeps the resulting StoredTable instances open for as long as this instance exists (they
+        are memory-mapped, so this holds no data in memory beyond what is actually looked up). The
+        item argument is passed through to StoredTable::open() for each table (used only to
+        retrieve a logger; not otherwise a SimulationItem in this hierarchy). Idempotent; throws
+        FatalError on a missing or malformed file. */
+    void initializeRecombinationTables(const SimulationItem* item);
 
     /** Returns true when initializeRecombinationTables() has completed. */
-    static bool recombinationTablesReady();
+    bool recombinationTablesReady() const;
 
     // ============== Collisionally excited lines ==============
 
@@ -231,21 +257,21 @@ public:
         extended-inventory line): level populations from electron collisions
         at (T, ne) without radiative pumping, times nIon V. Uses the atomic models when loaded,
         else the legacy q_col tables. Densities in cm^-3, volume in cm^3. */
-    static double collisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3);
+    double collisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3) const;
 
     /** Loads the atomic models of the built-in collisional lines' carrier species and maps each
         line to its transition by nearest wavelength. Idempotent. */
-    static void initializeAtomicModels();
+    void initializeAtomicModels();
 
     /** Returns true when initializeAtomicModels() has completed. */
-    static bool atomicModelsReady();
+    bool atomicModelsReady() const;
 
     /** Model slot of the species carrying the given registry line, or -1 if the line is not served
         by a loaded atomic model. Lines with the same slot share one solve. */
-    static int lineModelSlot(int lineIdx);
+    int lineModelSlot(int lineIdx) const;
 
     /** Transition index of the given registry line within its model (valid when lineModelSlot() >= 0). */
-    static int lineTransition(int lineIdx);
+    int lineTransition(int lineIdx) const;
 
     // ============== Statistical equilibrium ==============
 
@@ -297,7 +323,7 @@ public:
                                 int maxNumLevels, AtomicModel& model);
 
     /** The atomic model loaded by initializeAtomicModels() into the given slot (see lineModelSlot()). */
-    static const AtomicModel& atomicModel(int slot);
+    const AtomicModel& atomicModel(int slot) const;
 
     /** Solves the statistical-equilibrium rate matrix and returns level populations [m^-3]
         normalized to env.nTotal. Throws FatalError if the matrix is singular or the
@@ -306,6 +332,46 @@ public:
 
     /** Line power densities [W m^-3] for all radiative transitions: n_up A h c / lambda. */
     static std::vector<double> lineEmissivities(const AtomicModel& model, const std::vector<double>& pops);
+
+    // ================== Data members ==================
+
+private:
+    // the mutable line registry: the constructor sets the built-in lines, extendLineRegistry()
+    // appends to it in place
+    std::vector<LineDef> _registry;
+
+    // registry mapping recombination lines to loaded Case B emissivity tables; filled by
+    // initializeRecombinationTables() and extended by extendLineRegistry(), read-only afterwards.
+    // Every underlying stab file is bundled into a single dictionary (see StoredTableDictionary)
+    // so that opening the full extended catalog does not require a separate memory map -- and
+    // thus a separate open file -- per line; StoredTable is move-only, so growing the table vector
+    // via push_back()/emplace_back() moves existing elements rather than copying them, which would
+    // be unsafe.
+    struct RecombRegistry
+    {
+        bool ready = false;
+        StoredTableDictionary<2> dict;
+        std::vector<StoredTable<2>> table = std::vector<StoredTable<2>>(numLines);
+        std::vector<bool> loaded = std::vector<bool>(numLines, false);
+    };
+    RecombRegistry _recombRegistry;
+
+    // maps the built-in collisional lines (and any added by extendLineRegistry()) to loaded atomic
+    // models and transitions; filled once by initializeAtomicModels(), extended by
+    // extendLineRegistry(), read-only otherwise
+    struct AtomicLineRegistry
+    {
+        bool ready = false;
+        std::vector<AtomicModel> models;                                   // one per carrier species
+        std::vector<std::string> modelNames;                               // species name per model slot
+        std::vector<int> lineModel = std::vector<int>(numLines, -1);       // model slot per line, -1 = none
+        std::vector<int> lineTransition = std::vector<int>(numLines, -1);  // transition index within the model
+    };
+    AtomicLineRegistry _atomicRegistry;
+
+    // solves the collisional line luminosity via the atomic-model solver; helper for
+    // collisionalLineLuminosity() when an atomic model is available for the line
+    double solvedCollisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3) const;
 };
 
 //////////////////////////////////////////////////////////////////////

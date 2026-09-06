@@ -21,33 +21,25 @@ constexpr int GasLineEmission::lineElementIndex[GasLineEmission::numLines];
 
 //////////////////////////////////////////////////////////////////////
 
-namespace
+GasLineEmission::GasLineEmission()
 {
-    // the mutable registry storage behind lineRegistry(): the built-in lines at construction,
-    // extended in place by extendLineRegistry()
-    std::vector<GasLineEmission::LineDef>& mutableLineRegistry()
+    _registry.reserve(numLines);
+    for (int k = 0; k != numLines; ++k)
     {
-        static std::vector<GasLineEmission::LineDef> registry = [] {
-            std::vector<GasLineEmission::LineDef> v;
-            v.reserve(GasLineEmission::numLines);
-            for (int k = 0; k != GasLineEmission::numLines; ++k)
-            {
-                v.push_back({GasLineEmission::lineWavelengths[k], GasLineEmission::lineMasses[k],
-                             GasLineEmission::lineCarrierIonIndex[k], GasLineEmission::lineElementIndex[k],
-                             k >= GasLineEmission::HeI5876 && k <= GasLineEmission::HeI10830,
-                             k >= GasLineEmission::HeII1640 && k <= GasLineEmission::HeII4686});
-            }
-            return v;
-        }();
-        return registry;
+        _registry.push_back({lineWavelengths[k], lineMasses[k], lineCarrierIonIndex[k], lineElementIndex[k],
+                             k >= HeI5876 && k <= HeI10830, k >= HeII1640 && k <= HeII4686});
     }
 }
 
 //////////////////////////////////////////////////////////////////////
 
-const std::vector<GasLineEmission::LineDef>& GasLineEmission::lineRegistry()
+GasLineEmission::~GasLineEmission() = default;
+
+//////////////////////////////////////////////////////////////////////
+
+const std::vector<GasLineEmission::LineDef>& GasLineEmission::lineRegistry() const
 {
-    return mutableLineRegistry();
+    return _registry;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -839,22 +831,6 @@ namespace
 {
     // ============== Case B recombination-line emissivity tables ==============
 
-    // registry mapping recombination lines to loaded emissivity tables; filled at setup by
-    // initializeRecombinationTables() and extended by extendLineRegistry(), read-only afterwards.
-    // All of the underlying stab files are bundled into a single dictionary (see
-    // StoredTableDictionary) so that opening the full extended catalog does not require a separate
-    // memory map -- and thus a separate open file -- per line; StoredTable is move-only, so growing
-    // the table vector via push_back()/emplace_back() moves existing elements rather than copying
-    // them, which would be unsafe.
-    struct RecombRegistry
-    {
-        bool ready = false;
-        StoredTableDictionary<2> dict;
-        std::vector<StoredTable<2>> table = std::vector<StoredTable<2>>(GasLineEmission::numLines);
-        std::vector<bool> loaded = std::vector<bool>(GasLineEmission::numLines, false);
-    };
-    RecombRegistry _recombRegistry;
-
     // axes/quantity specification shared by every Case B emissivity table (verified against the
     // resource files: 2D, logarithmic T[K]/n[1/cm3] axes, logarithmic dimensionless Emis quantity)
     const char* recombAxes = "T(K),n(1/cm3)";
@@ -912,7 +888,7 @@ void GasLineEmission::initializeRecombinationTables(const SimulationItem* item)
 
 //////////////////////////////////////////////////////////////////////
 
-bool GasLineEmission::recombinationTablesReady()
+bool GasLineEmission::recombinationTablesReady() const
 {
     return _recombRegistry.ready;
 }
@@ -920,7 +896,7 @@ bool GasLineEmission::recombinationTablesReady()
 //////////////////////////////////////////////////////////////////////
 
 double GasLineEmission::recombinationLineLuminosity(int lineIdx, double T, double ne, double nIon, double gammaHI,
-                                                    double nHI, double V_cm3)
+                                                    double nHI, double V_cm3) const
 {
     if (_recombRegistry.ready && _recombRegistry.loaded[lineIdx])
     {
@@ -1194,33 +1170,17 @@ std::vector<double> GasLineEmission::lineEmissivities(const AtomicModel& model, 
 
 //////////////////////////////////////////////////////////////////////
 
-namespace
+double GasLineEmission::solvedCollisionalLineLuminosity(int lineIdx, double T, double ne, double nIon,
+                                                        double V_cm3) const
 {
-    // maps the built-in collisional lines to loaded atomic models and transitions;
-    // filled once at setup by initializeAtomicModels(), read-only afterwards
-    struct AtomicLineRegistry
-    {
-        bool ready = false;
-        std::vector<GasLineEmission::AtomicModel> models;  // one per carrier species
-        std::vector<std::string> modelNames;               // species name per model slot
-        std::vector<int> lineModel =                       // model slot per line, -1 = no atomic model
-            std::vector<int>(GasLineEmission::numLines, -1);
-        std::vector<int> lineTransition =  // transition index within the model
-            std::vector<int>(GasLineEmission::numLines, -1);
-    };
-    AtomicLineRegistry _atomicRegistry;
-
-    double solvedCollisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3)
-    {
-        const auto& model = _atomicRegistry.models[_atomicRegistry.lineModel[lineIdx]];
-        GasLineEmission::Environment env;
-        env.Tkin = T;
-        env.nTotal = nIon * 1e6;    // cm^-3 -> m^-3
-        env.nPartner = {ne * 1e6};  // cm^-3 -> m^-3
-        auto pops = GasLineEmission::solveLevelPopulations(model, env);
-        auto eps = GasLineEmission::lineEmissivities(model, pops);
-        return eps[_atomicRegistry.lineTransition[lineIdx]] * V_cm3 * 1e-6;  // W m^-3 x V [m^3] = W
-    }
+    const auto& model = _atomicRegistry.models[_atomicRegistry.lineModel[lineIdx]];
+    Environment env;
+    env.Tkin = T;
+    env.nTotal = nIon * 1e6;    // cm^-3 -> m^-3
+    env.nPartner = {ne * 1e6};  // cm^-3 -> m^-3
+    auto pops = solveLevelPopulations(model, env);
+    auto eps = lineEmissivities(model, pops);
+    return eps[_atomicRegistry.lineTransition[lineIdx]] * V_cm3 * 1e-6;  // W m^-3 x V [m^3] = W
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -1278,14 +1238,14 @@ void GasLineEmission::initializeAtomicModels()
 
 //////////////////////////////////////////////////////////////////////
 
-bool GasLineEmission::atomicModelsReady()
+bool GasLineEmission::atomicModelsReady() const
 {
     return _atomicRegistry.ready;
 }
 
 //////////////////////////////////////////////////////////////////////
 
-int GasLineEmission::lineModelSlot(int lineIdx)
+int GasLineEmission::lineModelSlot(int lineIdx) const
 {
     if (!_atomicRegistry.ready || lineIdx < 0 || lineIdx >= static_cast<int>(_atomicRegistry.lineModel.size()))
         return -1;
@@ -1294,7 +1254,7 @@ int GasLineEmission::lineModelSlot(int lineIdx)
 
 //////////////////////////////////////////////////////////////////////
 
-int GasLineEmission::lineTransition(int lineIdx)
+int GasLineEmission::lineTransition(int lineIdx) const
 {
     if (!_atomicRegistry.ready || lineIdx < 0 || lineIdx >= static_cast<int>(_atomicRegistry.lineTransition.size()))
         return -1;
@@ -1303,14 +1263,14 @@ int GasLineEmission::lineTransition(int lineIdx)
 
 //////////////////////////////////////////////////////////////////////
 
-const GasLineEmission::AtomicModel& GasLineEmission::atomicModel(int slot)
+const GasLineEmission::AtomicModel& GasLineEmission::atomicModel(int slot) const
 {
     return _atomicRegistry.models[slot];
 }
 
 //////////////////////////////////////////////////////////////////////
 
-double GasLineEmission::collisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3)
+double GasLineEmission::collisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3) const
 {
     if (_atomicRegistry.ready && _atomicRegistry.lineModel[lineIdx] >= 0)
         return solvedCollisionalLineLuminosity(lineIdx, T, ne, nIon, V_cm3);
@@ -1342,7 +1302,7 @@ namespace
 
 int GasLineEmission::extendLineRegistry(const std::vector<SpeciesSpec>& species)
 {
-    auto& registry = mutableLineRegistry();
+    auto& registry = _registry;
     if (!_recombRegistry.ready || !_atomicRegistry.ready)
         throw FATALERROR("Extending the line registry requires the recombination tables and solver models");
     if (static_cast<int>(registry.size()) > numLines) return 0;

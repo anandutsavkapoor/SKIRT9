@@ -7,6 +7,7 @@
 #define DIFFUSEIONIZEDGASMIX_HPP
 
 #include "EmittingGasMix.hpp"
+#include "GasLineEmission.hpp"
 #include "PhotoIonizationSolver.hpp"
 #include "StoredTable.hpp"
 
@@ -560,6 +561,12 @@ private:
 
     // PIO-style emission: solver for computing ion fractions from Jv + T
     PhotoIonizationSolver _emissionSolver;
+
+    // Line inventory, Case B tables and atomic models shared by the line-emission calculations
+    // below; owning this instance (rather than sharing process-global state) means its resources
+    // are released when this DiffuseIonizedGasMix instance is, not at unspecified static
+    // destruction order
+    GasLineEmission _gasLineEmission;
 
     // Line emission data (initialized in setupSelfBefore)
     int _numLines = 0;
