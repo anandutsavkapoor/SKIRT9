@@ -626,8 +626,19 @@ void NonLTELineGasMix::initializeSpecificState(MaterialState* state, double /*me
             Array levelPops(numLevels);
             for (int p = 0; p != numLevels; ++p)
                 levelPops[p] = _model.weight[p] * exp(-_model.energy[p] / Constants::k() / Tkin);
-            // normalize and store
-            levelPops *= state->numberDensity() / levelPops.sum();
+            // normalize and store; a non-positive Tkin (schema-legal: defaultTemperature allows 0, and
+            // so does an imported temperature) makes the sum zero or NaN, so fall back to putting all
+            // population in the ground state -- the T->0 limit of a Boltzmann distribution -- instead
+            double sum = levelPops.sum();
+            if (sum > 0.)
+            {
+                levelPops *= state->numberDensity() / sum;
+            }
+            else
+            {
+                for (int p = 0; p != numLevels; ++p) levelPops[p] = 0.;
+                levelPops[0] = state->numberDensity();
+            }
             for (int p = 0; p != numLevels; ++p) state->setLevelPopulation(p, levelPops[p]);
         };
 
@@ -647,14 +658,20 @@ void NonLTELineGasMix::initializeSpecificState(MaterialState* state, double /*me
         else if (initialLevelPopsCase() == InitialLevelPopsCase::Custom)
         {
             // if the user configured a file with initial level populations, use those data instead;
-            // fall back to LTE for any cell whose index is not present in that file
+            // fall back to LTE for any cell whose index is not present in that file, or whose row
+            // does not sum to a positive value
             size_t m = state->cellIndex();
+            Array levelPops(numLevels);
+            double sum = 0.;
             if (m < _initLevelPops.size())
             {
-                Array levelPops(numLevels);
                 for (int p = 0; p != numLevels; ++p) levelPops[p] = _initLevelPops[m][p + 1];
+                sum = levelPops.sum();
+            }
+            if (sum > 0.)
+            {
                 // normalize and store
-                levelPops *= state->numberDensity() / levelPops.sum();
+                levelPops *= state->numberDensity() / sum;
                 for (int p = 0; p != numLevels; ++p) state->setLevelPopulation(p, levelPops[p]);
             }
             else
@@ -831,7 +848,13 @@ double NonLTELineGasMix::solveLevelPopulations(MaterialState* state, const Array
         double oldPop = state->levelPopulation(p);
         double newPop = solution[p];
         state->setLevelPopulation(p, newPop);
-        change += abs(oldPop / newPop - 1.);
+        // a population that dropped to exactly zero is a full (100%) relative change; one that
+        // stayed at zero is no change -- either way, avoid the 0/0 or x/0 that oldPop/newPop would
+        // otherwise produce, which would silently read as "converged" in the caller
+        if (newPop > 0.)
+            change += abs(oldPop / newPop - 1.);
+        else if (oldPop > 0.)
+            change += 1.;
     }
     return change / numLevels;
 }
@@ -856,7 +879,11 @@ bool NonLTELineGasMix::isSpecificStateConverged(int numCells, int /*numUpdated*/
         {
             double currentPop = currentAggregate->levelPopulation(p);
             double previousPop = previousAggregate->levelPopulation(p);
-            double diff = abs((currentPop - previousPop) / previousPop);
+            // as in solveLevelPopulations(), avoid dividing by a previousPop that is exactly zero:
+            // treat a population that appeared from zero as a full (100%) change, and one that
+            // stayed at zero as no change, instead of letting a NaN silently fail the comparison below
+            double diff =
+                previousPop > 0. ? abs((currentPop - previousPop) / previousPop) : (currentPop > 0. ? 1. : 0.);
             if (diff > changeInGlobalLevelPops) changeInGlobalLevelPops = diff;
         }
 

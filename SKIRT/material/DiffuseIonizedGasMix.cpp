@@ -844,8 +844,11 @@ bool DiffuseIonizedGasMix::isSpecificStateConverged(int /*numCells*/, int numUpd
                                                     MaterialState* previousAggregate) const
 {
     // Calculate fraction of converged cells (0-1)
-    // Use numUpdated instead of numCells to only count cells that contain material
-    double fractionNotConverged = static_cast<double>(numNotConverged) / static_cast<double>(numUpdated);
+    // Use numUpdated instead of numCells to only count cells that contain material; when this
+    // component currently has no active cells at all, there is nothing that could have failed to
+    // converge, so treat it as vacuously converged instead of dividing by zero
+    double fractionNotConverged =
+        numUpdated > 0 ? static_cast<double>(numNotConverged) / static_cast<double>(numUpdated) : 0.;
     double convergedFraction = 1.0 - fractionNotConverged;
 
     // Check standard convergence criterion
@@ -2419,28 +2422,32 @@ void DiffuseIonizedGasMix::precomputeOpacityArrays(MaterialState* state, const A
             ReemissionData data;
             calculateReemissionProbabilities(state, lambda, data);
 
-            // Calculate hydrogen reemission probability
-            double hydrogenScatProb = data.probabilities[ReemissionChannel::Hydrogen];
-
-            // Calculate helium reemission probability (if wavelength can ionize helium)
-            double heliumScatProb = 0.0;
-            if (lambda <= _lambdaHe)
+            // if data is invalid, leave probReemission at its 0 default
+            if (data.valid)
             {
-                heliumScatProb += data.probabilities[ReemissionChannel::HeliumLyC];
-                heliumScatProb += data.probabilities[ReemissionChannel::HeliumNpEv];
-                heliumScatProb += data.probabilities[ReemissionChannel::HeliumTPC] * heliumTpcHIonizingFraction;
+                // Calculate hydrogen reemission probability
+                double hydrogenScatProb = data.probabilities[ReemissionChannel::Hydrogen];
 
-                // Handle Helium Lyman alpha on-the-spot absorption
-                const double h0 = state->hNeutralFraction();
-                const double he0 = state->heNeutralFraction();
-                const double T = state->temperature();
-                const double sqrtT_nH0 = std::sqrt(T) * h0;
-                const double pHots = sqrtT_nH0 / (sqrtT_nH0 + heliumLyaOtsCoeff * he0);
-                heliumScatProb += data.probabilities[ReemissionChannel::HeliumLyA] * (1.0 - pHots);
+                // Calculate helium reemission probability (if wavelength can ionize helium)
+                double heliumScatProb = 0.0;
+                if (lambda <= _lambdaHe)
+                {
+                    heliumScatProb += data.probabilities[ReemissionChannel::HeliumLyC];
+                    heliumScatProb += data.probabilities[ReemissionChannel::HeliumNpEv];
+                    heliumScatProb += data.probabilities[ReemissionChannel::HeliumTPC] * heliumTpcHIonizingFraction;
+
+                    // Handle Helium Lyman alpha on-the-spot absorption
+                    const double h0 = state->hNeutralFraction();
+                    const double he0 = state->heNeutralFraction();
+                    const double T = state->temperature();
+                    const double sqrtT_nH0 = std::sqrt(T) * h0;
+                    const double pHots = sqrtT_nH0 / (sqrtT_nH0 + heliumLyaOtsCoeff * he0);
+                    heliumScatProb += data.probabilities[ReemissionChannel::HeliumLyA] * (1.0 - pHots);
+                }
+
+                // Weighted average reemission probability based on which species absorbs
+                probReemission = data.pHabs * hydrogenScatProb + (1.0 - data.pHabs) * heliumScatProb;
             }
-
-            // Weighted average reemission probability based on which species absorbs
-            probReemission = data.pHabs * hydrogenScatProb + (1.0 - data.pHabs) * heliumScatProb;
         }
 
         if (useCloudyOpacity())
