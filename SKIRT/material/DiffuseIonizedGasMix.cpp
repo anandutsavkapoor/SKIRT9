@@ -169,6 +169,8 @@ namespace
     static constexpr int numReemissionChannels = 5;
 }
 
+////////////////////////////////////////////////////////////////////
+
 // out-of-line definition of the ReemissionData type forward-declared in the header (see there for
 // why): none of its details are needed outside this translation unit
 struct DiffuseIonizedGasMix::ReemissionData
@@ -368,12 +370,13 @@ void DiffuseIonizedGasMix::setupSelfBefore()
         // three unconditionally, regardless of whether the resources happen to be installed, so
         // that the fallback lines (legacy P_B recombination, precomputed q_col collisional rates,
         // built-in registry only) stay reachable and testable on their own.
+        _gasLineEmission.initialize(this);
         if (includeExtendedLines())
         {
-            _gasLineEmission.initializeAtomicModels(this);
+            _gasLineEmission.initializeAtomicModels();
             find<Log>()->info("Collisional line emission uses the statistical-equilibrium solver");
 
-            _gasLineEmission.initializeRecombinationTables(this);
+            _gasLineEmission.initializeRecombinationTables();
             find<Log>()->info("Recombination line emission uses the Case B emissivity tables");
 
             static const char* romans[] = {"I", "II", "III", "IV",   "V",   "VI", "VII", "VIII", "IX",
@@ -387,13 +390,12 @@ void DiffuseIonizedGasMix::setupSelfBefore()
                     species.push_back(
                         {string(metals[e]) + "_" + romans[s - 1], PhotoIonizationSolver::stageOffset[elem] + s - 1, e});
             }
-            int numAdded = _gasLineEmission.extendLineRegistry(this, species);
-            find<Log>()->info("Added " + std::to_string(numAdded) + " lines to the line registry");
+            _gasLineEmission.initializeExtendedLineRegistry(species);
         }
         else
         {
-            find<Log>()->info("includeExtendedLines is false; using the built-in fallback lines\n"
-                              "  (legacy P_B recombination, precomputed q_col collisional rates)");
+            find<Log>()->info(
+                "Using the built-in fallback lines (legacy P_B recombination, precomputed q_col collisional rates)");
         }
 
         // select the active lines from the registry (see _activeLines)
@@ -1306,8 +1308,8 @@ Array DiffuseIonizedGasMix::lineEmissionSpectrum(const MaterialState* state, con
         env.Tkin = T;
         env.nTotal = nIon * 1e6;    // cm^-3 -> m^-3
         env.nPartner = {ne * 1e6};  // cm^-3 -> m^-3
-        auto pops = GasLineEmission::solveLevelPopulations(_gasLineEmission.atomicModel(_groupSlots[g]), env);
-        auto eps = GasLineEmission::lineEmissivities(_gasLineEmission.atomicModel(_groupSlots[g]), pops);
+        auto pops = _gasLineEmission.solveLevelPopulations(_gasLineEmission.atomicModel(_groupSlots[g]), env);
+        auto eps = _gasLineEmission.lineEmissivities(_gasLineEmission.atomicModel(_groupSlots[g]), pops);
         for (int i : _groupLines[g]) luminosities[i] = eps[_lineTransitions[i]] * V_cm3 * 1e-6;  // W m^-3 x m^3
     }
 

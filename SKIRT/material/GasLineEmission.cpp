@@ -107,35 +107,7 @@ namespace
         2,  2,  2,                           // OIII -> O
         6,  6,                               // SII -> S
     };
-}
 
-//////////////////////////////////////////////////////////////////////
-
-GasLineEmission::GasLineEmission()
-{
-    _registry.reserve(numLines);
-    for (int k = 0; k != numLines; ++k)
-    {
-        _registry.push_back({lineWavelengths[k], lineMasses[k], lineCarrierIonIndex[k], lineElementIndex[k],
-                             k >= HeI5876 && k <= HeI10830, k >= HeII1640 && k <= HeII4686});
-    }
-}
-
-//////////////////////////////////////////////////////////////////////
-
-GasLineEmission::~GasLineEmission() = default;
-
-//////////////////////////////////////////////////////////////////////
-
-const std::vector<GasLineEmission::LineDef>& GasLineEmission::lineRegistry() const
-{
-    return _registry;
-}
-
-//////////////////////////////////////////////////////////////////////
-
-namespace
-{
     // ============== Legacy H recombination data: P_B tables (Storey & Hummer 1995) ==============
 
     // Temperature grid: 10 points from 500 K to 30000 K (non-uniform in log space)
@@ -857,7 +829,7 @@ namespace
         }
     }
 
-    /** Internal: 2D Lagrange interpolation of log q_col table */
+    /** 2D Lagrange interpolation of log q_col table */
     static double interpolateQcolTable(const double table[qcNumNe][qcNumT], double T, double ne)
     {
         // Clamp to grid
@@ -901,36 +873,8 @@ namespace
         return interpolateQcolTable(table, T, ne);
     }
 
-}
-
-//////////////////////////////////////////////////////////////////////
-
-double GasLineEmission::hydrogenLineLuminosity(int lineIdx, double T, double ne, double gammaHI, double nHI,
-                                               double V_cm3)
-{
-    double PB = linePBonly(lineIdx, T, ne);
-    double lambda_m = lineWavelengths[lineIdx];
-    double hnu = h_SI * c_SI / lambda_m;  // photon energy [J]
-    // L = h*nu * P_B * Gamma_HI * n_HI * V [W]
-    return hnu * PB * gammaHI * nHI * V_cm3;
-}
-
-//////////////////////////////////////////////////////////////////////
-
-namespace
-{
     // ============== Case B recombination-line emissivity tables ==============
 
-    // axes/quantity specification shared by every Case B emissivity table (verified against the
-    // resource files: 2D, logarithmic T[K]/n[1/cm3] axes, logarithmic dimensionless Emis quantity)
-    const char* recombAxes = "T(K),n(1/cm3)";
-    const char* recombQuantity = "Emis(1)";
-}
-
-//////////////////////////////////////////////////////////////////////
-
-namespace
-{
     // table files for the built-in recombination lines, mapped explicitly because the file
     // labels follow per-set wavelength conventions (truncated vacuum for H I, air for He I,
     // rounded vacuum for He II) while the line indices use air wavelengths for optical lines;
@@ -940,89 +884,29 @@ namespace
         int lineIdx;
         const char* filename;
     };
-    const std::vector<LineFile>& recombLineFiles()
+    const vector<LineFile>& recombLineFiles()
     {
-        static const std::vector<LineFile> table = {{GasLineEmission::Ha, "HI_CaseB_6564A_line.stab"},
-                                                    {GasLineEmission::Hb, "HI_CaseB_4862A_line.stab"},
-                                                    {GasLineEmission::Hg, "HI_CaseB_4341A_line.stab"},
-                                                    {GasLineEmission::Hd, "HI_CaseB_4102A_line.stab"},
-                                                    {GasLineEmission::HeBalmer, "HI_CaseB_3971A_line.stab"},
-                                                    {GasLineEmission::Paa, "HI_CaseB_18756A_line.stab"},
-                                                    {GasLineEmission::Pab, "HI_CaseB_12821A_line.stab"},
-                                                    {GasLineEmission::Bra, "HI_CaseB_40522A_line.stab"},
-                                                    {GasLineEmission::HeI5876, "HeI_CaseB_5876A_line.stab"},
-                                                    {GasLineEmission::HeI6678, "HeI_CaseB_6678A_line.stab"},
-                                                    {GasLineEmission::HeI7065, "HeI_CaseB_7065A_line.stab"},
-                                                    {GasLineEmission::HeI10830, "HeI_CaseB_10830A_line.stab"},
-                                                    {GasLineEmission::HeII1640, "HeII_CaseB_1640A_line.stab"},
-                                                    {GasLineEmission::HeII4686, "HeII_CaseB_4687A_line.stab"}};
+        static const vector<LineFile> table = {{GasLineEmission::Ha, "HI_CaseB_6564A_line.stab"},
+                                               {GasLineEmission::Hb, "HI_CaseB_4862A_line.stab"},
+                                               {GasLineEmission::Hg, "HI_CaseB_4341A_line.stab"},
+                                               {GasLineEmission::Hd, "HI_CaseB_4102A_line.stab"},
+                                               {GasLineEmission::HeBalmer, "HI_CaseB_3971A_line.stab"},
+                                               {GasLineEmission::Paa, "HI_CaseB_18756A_line.stab"},
+                                               {GasLineEmission::Pab, "HI_CaseB_12821A_line.stab"},
+                                               {GasLineEmission::Bra, "HI_CaseB_40522A_line.stab"},
+                                               {GasLineEmission::HeI5876, "HeI_CaseB_5876A_line.stab"},
+                                               {GasLineEmission::HeI6678, "HeI_CaseB_6678A_line.stab"},
+                                               {GasLineEmission::HeI7065, "HeI_CaseB_7065A_line.stab"},
+                                               {GasLineEmission::HeI10830, "HeI_CaseB_10830A_line.stab"},
+                                               {GasLineEmission::HeII1640, "HeII_CaseB_1640A_line.stab"},
+                                               {GasLineEmission::HeII4686, "HeII_CaseB_4687A_line.stab"}};
         return table;
     }
-}
 
-//////////////////////////////////////////////////////////////////////
-
-void GasLineEmission::initializeRecombinationTables(const SimulationItem* item)
-{
-    if (_recombRegistry.ready) return;
-
-    _recombRegistry.dict.open(item, "EmissionCaseB.stabdict", recombAxes, recombQuantity);
-
-    for (const auto& entry : recombLineFiles())
-    {
-        _recombRegistry.table[entry.lineIdx] = _recombRegistry.dict.open(entry.filename);
-        _recombRegistry.loaded[entry.lineIdx] = true;
-    }
-    _recombRegistry.ready = true;
-}
-
-//////////////////////////////////////////////////////////////////////
-
-bool GasLineEmission::recombinationTablesReady() const
-{
-    return _recombRegistry.ready;
-}
-
-//////////////////////////////////////////////////////////////////////
-
-double GasLineEmission::recombinationLineLuminosity(int lineIdx, double T, double ne, double nIon, double gammaHI,
-                                                    double nHI, double V_cm3) const
-{
-    if (_recombRegistry.ready && _recombRegistry.loaded[lineIdx])
-    {
-        double eps = _recombRegistry.table[lineIdx](T, ne);
-        // eps [W m3] with cgs densities and volume: L [W] = eps * ne * nIon * V_cm3 * 1e6
-        return eps * ne * nIon * V_cm3 * 1e6;
-    }
-    // legacy branch: P_B form for H lines (Lyman-alpha always lands here); He lines are zero
-    if (lineIdx <= Bra) return hydrogenLineLuminosity(lineIdx, T, ne, gammaHI, nHI, V_cm3);
-    return 0.;
-}
-
-//////////////////////////////////////////////////////////////////////
-
-namespace
-{
-    // legacy table path: precomputed q_col(T, ne) grids, used when the atomic data resources
-    // are unavailable
-    double tabulatedCollisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3)
-    {
-        double qcol = metalLineQcol(lineIdx, T, ne);
-        double lambda_m = lineWavelengths[lineIdx];
-        double hnu = h_SI * c_SI / lambda_m;
-        // L = h*nu * q_col * ne * nIon * V  [total luminosity in W]
-        return hnu * qcol * ne * nIon * V_cm3;
-    }
-}
-
-//////////////////////////////////////////////////////////////////////
-
-namespace
-{
     // ============== Level populations (statistical equilibrium) ==============
 
     // clamped log-log interpolation replicating NR::clampedValue<NR::interpolateLogLog>
-    double clampedLogLog(double x, const std::vector<double>& xv, const std::vector<double>& yv)
+    double clampedLogLog(double x, const vector<double>& xv, const vector<double>& yv)
     {
         int n = static_cast<int>(xv.size());
         if (x < xv[0]) return yv[0];
@@ -1040,10 +924,10 @@ namespace
 
     // LU solve with row pivoting only on a zero diagonal; throws on a singular matrix or a
     // non-finite solution
-    std::vector<double> solveMatrixEquationLU(std::vector<std::vector<double>>& matrix)
+    vector<double> solveMatrixEquationLU(vector<vector<double>>& matrix)
     {
         size_t size = matrix.size();
-        std::vector<double> solution(size);
+        vector<double> solution(size);
         for (size_t i = 0; i < size; i++) solution[i] = matrix[i][size];
 
         for (size_t k = 0; k < size - 1; ++k)
@@ -1087,19 +971,298 @@ namespace
         }
         return solution;
     }
+
+    // one Case B recombination table set for the extended inventory: the wavelength index
+    // file, the stab file name prefix (the label is the truncated wavelength in A), and the
+    // line family
+    struct RecombSet
+    {
+        const char* indexFile;
+        const char* prefix;
+        bool isHeI;
+        bool isHeII;
+        double mass;
+    };
+    constexpr double _protonMass = 1.67262192e-27;
+    const RecombSet _recombSets[] = {{"HI_wavelengths.txt", "HI_CaseB_", false, false, _protonMass},
+                                     {"HeI_wavelengths.txt", "HeI_CaseB_", true, false, 4.0 * _protonMass},
+                                     {"HeII_wavelengths.txt", "HeII_CaseB_", false, true, 4.0 * _protonMass}};
 }
 
 //////////////////////////////////////////////////////////////////////
 
-void GasLineEmission::loadAtomicModel(const SimulationItem* item, const std::string& speciesName,
-                                      const std::vector<std::string>& partnerNames, int maxNumLevels,
-                                      AtomicModel& model)
+GasLineEmission::GasLineEmission() {}
+
+//////////////////////////////////////////////////////////////////////
+
+GasLineEmission::~GasLineEmission() {}
+
+//////////////////////////////////////////////////////////////////////
+
+void GasLineEmission::initialize(const SimulationItem* item)
+{
+    // remember a pointer to the item and the logger for this simulation
+    _item = item;
+    _log = item->find<Log>();
+
+    // add the built-in lines to the registry
+    _registry.reserve(numLines);
+    for (int k = 0; k != numLines; ++k)
+    {
+        _registry.push_back({lineWavelengths[k], lineMasses[k], lineCarrierIonIndex[k], lineElementIndex[k],
+                             k >= HeI5876 && k <= HeI10830, k >= HeII1640 && k <= HeII4686});
+        _recombRegistry.table.emplace_back();
+        _atomicRegistry.lineModel.push_back(-1);
+        _atomicRegistry.lineTransition.push_back(-1);
+    }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void GasLineEmission::initializeRecombinationTables()
+{
+    if (_recombRegistry.ready) return;
+
+    // open the stabdict containing the recombination tables
+    _recombRegistry.dict.open(_item, "EmissionCaseB.stabdict", "T(K),n(1/cm3)", "Emis(1)");
+
+    // open all tables in the dict
+    for (const auto& entry : recombLineFiles())
+    {
+        _recombRegistry.table[entry.lineIdx] = _recombRegistry.dict.open(entry.filename);
+    }
+
+    _recombRegistry.ready = true;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void GasLineEmission::initializeAtomicModels()
+{
+    if (_atomicRegistry.ready) return;
+
+    // carrier species and the lines they serve (LineIndex values)
+    struct SpeciesLines
+    {
+        const char* name;
+        vector<int> lines;
+    };
+    vector<SpeciesLines> table = {{"N_II", {NII6548, NII6583}},
+                                  {"O_I", {OI6300, OI6364}},
+                                  {"O_II", {OII3729, OII3726}},
+                                  {"O_III", {OIII4363, OIII4959, OIII5007}},
+                                  {"S_II", {SII6716, SII6731}}};
+
+    for (int k = 0; k != numLines; ++k)
+    {
+        _atomicRegistry.lineModel[k] = -1;
+        _atomicRegistry.lineTransition[k] = -1;
+    }
+    for (const auto& entry : table)
+    {
+        AtomicModel model;
+        loadAtomicModel(entry.name, {"e-"}, 20, model);
+        int slot = static_cast<int>(_atomicRegistry.models.size());
+        _atomicRegistry.models.push_back(std::move(model));
+        _atomicRegistry.modelNames.push_back(entry.name);
+        const auto& m = _atomicRegistry.models[slot];
+        for (int lineIdx : entry.lines)
+        {
+            // map the line to the nearest-wavelength transition of its carrier
+            double target = lineWavelengths[lineIdx];
+            int kbest = -1;
+            double dbest = std::numeric_limits<double>::infinity();
+            for (int k = 0; k != m.numLines(); ++k)
+            {
+                double d = std::abs(m.center[k] - target);
+                if (d < dbest)
+                {
+                    dbest = d;
+                    kbest = k;
+                }
+            }
+            _atomicRegistry.lineModel[lineIdx] = slot;
+            _atomicRegistry.lineTransition[lineIdx] = kbest;
+        }
+    }
+    _atomicRegistry.ready = true;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void GasLineEmission::initializeExtendedLineRegistry(const vector<SpeciesSpec>& species)
+{
+    // ensure that the recombination tables and atomic models are loaded
+    initializeRecombinationTables();
+    initializeAtomicModels();
+
+    // quit if extended lines are already loaded
+    if (static_cast<int>(_registry.size()) > numLines) return;
+
+    // file names already claimed by the built-in recombination lines
+    std::set<string> claimedFiles;
+    for (const auto& entry : recombLineFiles()) claimedFiles.insert(entry.filename);
+
+    // (model slot, transition) pairs already claimed by the built-in collisional lines
+    std::set<std::pair<int, int>> claimedTransitions;
+    for (int k = 0; k != numLines; ++k)
+        if (_atomicRegistry.lineModel[k] >= 0)
+            claimedTransitions.insert({_atomicRegistry.lineModel[k], _atomicRegistry.lineTransition[k]});
+
+    int numAdded = 0;
+    int numModelsLoaded = 0;
+
+    // recombination inventory: every table enumerated by the per-set wavelength index files
+    for (const auto& set : _recombSets)
+    {
+        // read the raw Angstrom value with no unit conversion (i.e. exactly as the old istream-based
+        // code did): the filename and the registry wavelength below both need the untouched value,
+        // and going through the "wavelength" quantity and back would round-trip it through the unit
+        // system's Angstrom<->SI conversion for no benefit, risking a last-bit mismatch that could
+        // flip the truncated integer used to build the filename
+        TextInFile index(_item, set.indexFile, "recombination line wavelengths", true);
+        index.addColumn("Wavelength");
+        double wavelengthA;
+        while (index.readRow(wavelengthA))
+        {
+            string filename = set.prefix + std::to_string(static_cast<long long>(wavelengthA)) + "A_line.stab";
+            if (!claimedFiles.insert(filename).second) continue;
+
+            _recombRegistry.table.push_back(_recombRegistry.dict.open(filename));
+            _registry.push_back({wavelengthA * 1e-10, set.mass, -1, -1, set.isHeI, set.isHeII});
+            _atomicRegistry.lineModel.push_back(-1);
+            _atomicRegistry.lineTransition.push_back(-1);
+            ++numAdded;
+        }
+    }
+
+    // collisional lines: every transition of every loadable species
+    for (const auto& spec : species)
+    {
+        int slot = -1;
+        for (int m = 0; m != static_cast<int>(_atomicRegistry.modelNames.size()); ++m)
+            if (_atomicRegistry.modelNames[m] == spec.name) slot = m;
+        if (slot < 0)
+        {
+            // not every candidate (element, ionization-stage) species has data in the resource
+            // pack; skip absent ones by checking first rather than treating that as an error
+            if (!FilePaths::hasResource(spec.name + "_Mass.txt")) continue;
+
+            AtomicModel model;
+            loadAtomicModel(spec.name, {"e-"}, 20, model);
+            ++numModelsLoaded;
+            slot = static_cast<int>(_atomicRegistry.models.size());
+            _atomicRegistry.models.push_back(std::move(model));
+            _atomicRegistry.modelNames.push_back(spec.name);
+        }
+        const auto& m = _atomicRegistry.models[slot];
+        for (int t = 0; t != m.numLines(); ++t)
+        {
+            if (claimedTransitions.count({slot, t})) continue;
+            _registry.push_back({m.center[t], m.mass, spec.carrierIonIndex, spec.elementIndex, false, false});
+            _recombRegistry.table.emplace_back();
+            _atomicRegistry.lineModel.push_back(slot);
+            _atomicRegistry.lineTransition.push_back(t);
+            ++numAdded;
+        }
+    }
+
+    // inform the user
+    _log->info("Line registry extended with " + std::to_string(numAdded) + " lines from "
+               + std::to_string(numModelsLoaded) + " atomic models");
+}
+
+//////////////////////////////////////////////////////////////////////
+
+const vector<GasLineEmission::LineDef>& GasLineEmission::lineRegistry() const
+{
+    return _registry;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+double GasLineEmission::hydrogenLineLuminosity(int lineIdx, double T, double ne, double gammaHI, double nHI,
+                                               double V_cm3) const
+{
+    double PB = linePBonly(lineIdx, T, ne);
+    double lambda_m = lineWavelengths[lineIdx];
+    double hnu = h_SI * c_SI / lambda_m;  // photon energy [J]
+    // L = h*nu * P_B * Gamma_HI * n_HI * V [W]
+    return hnu * PB * gammaHI * nHI * V_cm3;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+double GasLineEmission::recombinationLineLuminosity(int lineIdx, double T, double ne, double nIon, double gammaHI,
+                                                    double nHI, double V_cm3) const
+{
+    if (_recombRegistry.ready && _recombRegistry.loaded(lineIdx))
+    {
+        double eps = _recombRegistry.table[lineIdx](T, ne);
+        // eps [W m3] with cgs densities and volume: L [W] = eps * ne * nIon * V_cm3 * 1e6
+        return eps * ne * nIon * V_cm3 * 1e6;
+    }
+    // legacy branch: P_B form for H lines (Lyman-alpha always lands here); He lines are zero
+    if (lineIdx <= Bra) return hydrogenLineLuminosity(lineIdx, T, ne, gammaHI, nHI, V_cm3);
+    return 0.;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+double GasLineEmission::collisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3) const
+{
+    if (_atomicRegistry.ready && _atomicRegistry.lineModel[lineIdx] >= 0)
+    {
+        // solved collisional line luminosity
+        const auto& model = _atomicRegistry.models[_atomicRegistry.lineModel[lineIdx]];
+        Environment env;
+        env.Tkin = T;
+        env.nTotal = nIon * 1e6;    // cm^-3 -> m^-3
+        env.nPartner = {ne * 1e6};  // cm^-3 -> m^-3
+        auto pops = solveLevelPopulations(model, env);
+        auto eps = lineEmissivities(model, pops);
+        return eps[_atomicRegistry.lineTransition[lineIdx]] * V_cm3 * 1e-6;  // W m^-3 x V [m^3] = W
+    }
+    else
+    {
+        // tabulated collisional line luminosity (precomputed q_col grids),
+        // used when the atomic data resources have not been loaded
+        double qcol = metalLineQcol(lineIdx, T, ne);
+        double lambda_m = lineWavelengths[lineIdx];
+        double hnu = h_SI * c_SI / lambda_m;
+        // L = h*nu * q_col * ne * nIon * V  [total luminosity in W]
+        return hnu * qcol * ne * nIon * V_cm3;
+    }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+int GasLineEmission::lineModelSlot(int lineIdx) const
+{
+    if (!_atomicRegistry.ready || lineIdx < 0 || lineIdx >= static_cast<int>(_atomicRegistry.lineModel.size()))
+        return -1;
+    return _atomicRegistry.lineModel[lineIdx];
+}
+
+//////////////////////////////////////////////////////////////////////
+
+int GasLineEmission::lineTransition(int lineIdx) const
+{
+    if (!_atomicRegistry.ready || lineIdx < 0 || lineIdx >= static_cast<int>(_atomicRegistry.lineTransition.size()))
+        return -1;
+    return _atomicRegistry.lineTransition[lineIdx];
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void GasLineEmission::loadAtomicModel(const string& speciesName, const vector<string>& partnerNames, int maxNumLevels,
+                                      AtomicModel& model) const
 {
     model = AtomicModel();
 
     // mass
     {
-        TextInFile infile(item, speciesName + "_Mass.txt", "mass", true, true);
+        TextInFile infile(_item, speciesName + "_Mass.txt", "mass", true, true);
         infile.addColumn("Mass", "mass", "amu");
         double mass;
         if (infile.readRow(mass)) model.mass = mass;
@@ -1107,7 +1270,7 @@ void GasLineEmission::loadAtomicModel(const SimulationItem* item, const std::str
 
     // energy levels and statistical weights, capped at maxNumLevels
     {
-        TextInFile infile(item, speciesName + "_Energy.txt", "energy levels", true, true);
+        TextInFile infile(_item, speciesName + "_Energy.txt", "energy levels", true, true);
         infile.addColumn("Energy", "energy", "1/cm");
         infile.addColumn("Weight");
         double energy, weight;
@@ -1122,7 +1285,7 @@ void GasLineEmission::loadAtomicModel(const SimulationItem* item, const std::str
 
     // radiative transitions, dropping any that involve levels beyond the cap
     {
-        TextInFile infile(item, speciesName + "_Rad_Coeff.txt", "radiative transitions", true, true);
+        TextInFile infile(_item, speciesName + "_Rad_Coeff.txt", "radiative transitions", true, true);
         infile.addColumn("Up index");
         infile.addColumn("Low index");
         infile.addColumn("Einstein A", "transitionrate", "1/s");
@@ -1145,7 +1308,7 @@ void GasLineEmission::loadAtomicModel(const SimulationItem* item, const std::str
     model.einsteinBul.resize(numRad);
     model.einsteinBlu.resize(numRad);
     model.branchRatio.resize(numRad);
-    std::vector<double> sumA(numLevels, 0.);
+    vector<double> sumA(numLevels, 0.);
     for (int k = 0; k != numRad; ++k) sumA[model.indexUpRad[k]] += model.einsteinA[k];
     for (int k = 0; k != numRad; ++k)
     {
@@ -1161,20 +1324,19 @@ void GasLineEmission::loadAtomicModel(const SimulationItem* item, const std::str
     // collisional transitions per partner
     for (const auto& pname : partnerNames)
     {
-        AtomicModel::ColPartner partner;
+        ColPartner partner;
         partner.name = pname;
 
         {
-            TextInFile infile(item, speciesName + "_Col_" + pname + "_Temp.txt", "temperature grid", true, true);
+            TextInFile infile(_item, speciesName + "_Col_" + pname + "_Temp.txt", "temperature grid", true, true);
             infile.addColumn("Temperature", "temperature", "K");
             Array tgrid;
             infile.readAllColumns(tgrid);
             partner.T.assign(begin(tgrid), end(tgrid));
         }
-
         {
             int numTemperatures = static_cast<int>(partner.T.size());
-            TextInFile infile(item, speciesName + "_Col_" + pname + "_Coeff.txt", "collisional transitions", true,
+            TextInFile infile(_item, speciesName + "_Col_" + pname + "_Coeff.txt", "collisional transitions", true,
                               true);
             infile.addColumn("Up index");
             infile.addColumn("Low index");
@@ -1187,7 +1349,7 @@ void GasLineEmission::loadAtomicModel(const SimulationItem* item, const std::str
                 {
                     partner.indexUpCol.push_back(up);
                     partner.indexLowCol.push_back(low);
-                    std::vector<double> K(numTemperatures);
+                    vector<double> K(numTemperatures);
                     for (int i = 0; i != numTemperatures; ++i) K[i] = row[i + 2];
                     partner.Kul.push_back(std::move(K));
                 }
@@ -1199,10 +1361,17 @@ void GasLineEmission::loadAtomicModel(const SimulationItem* item, const std::str
 
 //////////////////////////////////////////////////////////////////////
 
-std::vector<double> GasLineEmission::solveLevelPopulations(const AtomicModel& model, const Environment& env)
+const GasLineEmission::AtomicModel& GasLineEmission::atomicModel(int slot) const
+{
+    return _atomicRegistry.models[slot];
+}
+
+//////////////////////////////////////////////////////////////////////
+
+vector<double> GasLineEmission::solveLevelPopulations(const AtomicModel& model, const Environment& env) const
 {
     int numLevels = model.numLevels();
-    std::vector<std::vector<double>> matrix(numLevels, std::vector<double>(numLevels + 1, 0.));
+    vector<vector<double>> matrix(numLevels, vector<double>(numLevels + 1, 0.));
 
     // radiative transitions: spontaneous emission always; pumping terms only if meanJ is provided
     bool pumping = !env.meanJ.empty();
@@ -1238,16 +1407,14 @@ std::vector<double> GasLineEmission::solveLevelPopulations(const AtomicModel& mo
             double Klu = Kul * Kconversion;
             if (Kul <= 0.)
             {
-                if (env.warn)
-                    env.warn("collisional rate Kul <= 0 for partner " + partner.name + " transition ("
-                             + std::to_string(up) + "-" + std::to_string(low) + "); flooring to 1e-20");
+                _log->warning("collisional rate Kul <= 0 for partner " + partner.name + " transition ("
+                              + std::to_string(up) + "-" + std::to_string(low) + "); flooring to 1e-20");
                 Kul = 1.0e-20;
             }
             if (Klu <= 0.)
             {
-                if (env.warn)
-                    env.warn("collisional rate Klu <= 0 for partner " + partner.name + " transition ("
-                             + std::to_string(up) + "-" + std::to_string(low) + "); flooring to 1e-20*Kul");
+                _log->warning("collisional rate Klu <= 0 for partner " + partner.name + " transition ("
+                              + std::to_string(up) + "-" + std::to_string(low) + "); flooring to 1e-20*Kul");
                 Klu = 1.0e-20 * Kul;
             }
             double n = std::max(env.nPartner[c], 1.0e-20);
@@ -1266,226 +1433,12 @@ std::vector<double> GasLineEmission::solveLevelPopulations(const AtomicModel& mo
 
 //////////////////////////////////////////////////////////////////////
 
-std::vector<double> GasLineEmission::lineEmissivities(const AtomicModel& model, const std::vector<double>& pops)
+vector<double> GasLineEmission::lineEmissivities(const AtomicModel& model, const vector<double>& pops) const
 {
-    std::vector<double> eps(model.numLines());
+    vector<double> eps(model.numLines());
     for (int k = 0; k != model.numLines(); ++k)
         eps[k] = Constants::h() * Constants::c() / model.center[k] * model.einsteinA[k] * pops[model.indexUpRad[k]];
     return eps;
-}
-
-//////////////////////////////////////////////////////////////////////
-
-double GasLineEmission::solvedCollisionalLineLuminosity(int lineIdx, double T, double ne, double nIon,
-                                                        double V_cm3) const
-{
-    const auto& model = _atomicRegistry.models[_atomicRegistry.lineModel[lineIdx]];
-    Environment env;
-    env.Tkin = T;
-    env.nTotal = nIon * 1e6;    // cm^-3 -> m^-3
-    env.nPartner = {ne * 1e6};  // cm^-3 -> m^-3
-    auto pops = solveLevelPopulations(model, env);
-    auto eps = lineEmissivities(model, pops);
-    return eps[_atomicRegistry.lineTransition[lineIdx]] * V_cm3 * 1e-6;  // W m^-3 x V [m^3] = W
-}
-
-//////////////////////////////////////////////////////////////////////
-
-void GasLineEmission::initializeAtomicModels(const SimulationItem* item)
-{
-    if (_atomicRegistry.ready) return;
-
-    // carrier species and the lines they serve (LineIndex values)
-    struct SpeciesLines
-    {
-        const char* name;
-        std::vector<int> lines;
-    };
-    std::vector<SpeciesLines> table = {{"N_II", {NII6548, NII6583}},
-                                       {"O_I", {OI6300, OI6364}},
-                                       {"O_II", {OII3729, OII3726}},
-                                       {"O_III", {OIII4363, OIII4959, OIII5007}},
-                                       {"S_II", {SII6716, SII6731}}};
-
-    for (int k = 0; k != numLines; ++k)
-    {
-        _atomicRegistry.lineModel[k] = -1;
-        _atomicRegistry.lineTransition[k] = -1;
-    }
-    for (const auto& entry : table)
-    {
-        AtomicModel model;
-        loadAtomicModel(item, entry.name, {"e-"}, 20, model);
-        int slot = static_cast<int>(_atomicRegistry.models.size());
-        _atomicRegistry.models.push_back(std::move(model));
-        _atomicRegistry.modelNames.push_back(entry.name);
-        const auto& m = _atomicRegistry.models[slot];
-        for (int lineIdx : entry.lines)
-        {
-            // map the line to the nearest-wavelength transition of its carrier
-            double target = lineWavelengths[lineIdx];
-            int kbest = -1;
-            double dbest = std::numeric_limits<double>::infinity();
-            for (int k = 0; k != m.numLines(); ++k)
-            {
-                double d = std::abs(m.center[k] - target);
-                if (d < dbest)
-                {
-                    dbest = d;
-                    kbest = k;
-                }
-            }
-            _atomicRegistry.lineModel[lineIdx] = slot;
-            _atomicRegistry.lineTransition[lineIdx] = kbest;
-        }
-    }
-    _atomicRegistry.ready = true;
-}
-
-//////////////////////////////////////////////////////////////////////
-
-bool GasLineEmission::atomicModelsReady() const
-{
-    return _atomicRegistry.ready;
-}
-
-//////////////////////////////////////////////////////////////////////
-
-int GasLineEmission::lineModelSlot(int lineIdx) const
-{
-    if (!_atomicRegistry.ready || lineIdx < 0 || lineIdx >= static_cast<int>(_atomicRegistry.lineModel.size()))
-        return -1;
-    return _atomicRegistry.lineModel[lineIdx];
-}
-
-//////////////////////////////////////////////////////////////////////
-
-int GasLineEmission::lineTransition(int lineIdx) const
-{
-    if (!_atomicRegistry.ready || lineIdx < 0 || lineIdx >= static_cast<int>(_atomicRegistry.lineTransition.size()))
-        return -1;
-    return _atomicRegistry.lineTransition[lineIdx];
-}
-
-//////////////////////////////////////////////////////////////////////
-
-const GasLineEmission::AtomicModel& GasLineEmission::atomicModel(int slot) const
-{
-    return _atomicRegistry.models[slot];
-}
-
-//////////////////////////////////////////////////////////////////////
-
-double GasLineEmission::collisionalLineLuminosity(int lineIdx, double T, double ne, double nIon, double V_cm3) const
-{
-    if (_atomicRegistry.ready && _atomicRegistry.lineModel[lineIdx] >= 0)
-        return solvedCollisionalLineLuminosity(lineIdx, T, ne, nIon, V_cm3);
-    return tabulatedCollisionalLineLuminosity(lineIdx, T, ne, nIon, V_cm3);
-}
-
-//////////////////////////////////////////////////////////////////////
-
-namespace
-{
-    // one Case B recombination table set for the extended inventory: the wavelength index
-    // file, the stab file name prefix (the label is the truncated wavelength in A), and the
-    // line family
-    struct RecombSet
-    {
-        const char* indexFile;
-        const char* prefix;
-        bool isHeI;
-        bool isHeII;
-        double mass;
-    };
-    constexpr double _protonMass = 1.67262192e-27;
-    const RecombSet _recombSets[] = {{"HI_wavelengths.txt", "HI_CaseB_", false, false, _protonMass},
-                                     {"HeI_wavelengths.txt", "HeI_CaseB_", true, false, 4.0 * _protonMass},
-                                     {"HeII_wavelengths.txt", "HeII_CaseB_", false, true, 4.0 * _protonMass}};
-}
-
-//////////////////////////////////////////////////////////////////////
-
-int GasLineEmission::extendLineRegistry(const SimulationItem* item, const std::vector<SpeciesSpec>& species)
-{
-    auto& registry = _registry;
-    if (!_recombRegistry.ready || !_atomicRegistry.ready)
-        throw FATALERROR("Extending the line registry requires the recombination tables and solver models");
-    if (static_cast<int>(registry.size()) > numLines) return 0;
-
-    // file names already claimed by the built-in recombination lines
-    std::set<std::string> claimedFiles;
-    for (const auto& entry : recombLineFiles()) claimedFiles.insert(entry.filename);
-
-    // (model slot, transition) pairs already claimed by the built-in collisional lines
-    std::set<std::pair<int, int>> claimedTransitions;
-    for (int k = 0; k != numLines; ++k)
-        if (_atomicRegistry.lineModel[k] >= 0)
-            claimedTransitions.insert({_atomicRegistry.lineModel[k], _atomicRegistry.lineTransition[k]});
-
-    int numAdded = 0;
-    int numModelsLoaded = 0;
-
-    // recombination inventory: every table enumerated by the per-set wavelength index files
-    for (const auto& set : _recombSets)
-    {
-        // read the raw Angstrom value with no unit conversion (i.e. exactly as the old istream-based
-        // code did): the filename and the registry wavelength below both need the untouched value,
-        // and going through the "wavelength" quantity and back would round-trip it through the unit
-        // system's Angstrom<->SI conversion for no benefit, risking a last-bit mismatch that could
-        // flip the truncated integer used to build the filename
-        TextInFile index(item, set.indexFile, "recombination line wavelengths", true);
-        index.addColumn("Wavelength");
-        double wavelengthA;
-        while (index.readRow(wavelengthA))
-        {
-            std::string filename = set.prefix + std::to_string(static_cast<long long>(wavelengthA)) + "A_line.stab";
-            if (!claimedFiles.insert(filename).second) continue;
-
-            _recombRegistry.table.push_back(_recombRegistry.dict.open(filename));
-            registry.push_back({wavelengthA * 1e-10, set.mass, -1, -1, set.isHeI, set.isHeII});
-            _recombRegistry.loaded.push_back(true);
-            _atomicRegistry.lineModel.push_back(-1);
-            _atomicRegistry.lineTransition.push_back(-1);
-            ++numAdded;
-        }
-    }
-
-    // collisional lines: every transition of every loadable species
-    for (const auto& spec : species)
-    {
-        int slot = -1;
-        for (int m = 0; m != static_cast<int>(_atomicRegistry.modelNames.size()); ++m)
-            if (_atomicRegistry.modelNames[m] == spec.name) slot = m;
-        if (slot < 0)
-        {
-            // not every candidate (element, ionization-stage) species has data in the resource
-            // pack; skip absent ones by checking first rather than treating that as an error
-            if (!FilePaths::hasResource(spec.name + "_Mass.txt")) continue;
-
-            AtomicModel model;
-            loadAtomicModel(item, spec.name, {"e-"}, 20, model);
-            ++numModelsLoaded;
-            slot = static_cast<int>(_atomicRegistry.models.size());
-            _atomicRegistry.models.push_back(std::move(model));
-            _atomicRegistry.modelNames.push_back(spec.name);
-        }
-        const auto& m = _atomicRegistry.models[slot];
-        for (int t = 0; t != m.numLines(); ++t)
-        {
-            if (claimedTransitions.count({slot, t})) continue;
-            registry.push_back({m.center[t], m.mass, spec.carrierIonIndex, spec.elementIndex, false, false});
-            _recombRegistry.table.emplace_back();
-            _recombRegistry.loaded.push_back(false);
-            _atomicRegistry.lineModel.push_back(slot);
-            _atomicRegistry.lineTransition.push_back(t);
-            ++numAdded;
-        }
-    }
-
-    item->find<Log>()->info("Loaded " + std::to_string(numModelsLoaded)
-                            + " atomic models for the extended line registry");
-    return numAdded;
 }
 
 //////////////////////////////////////////////////////////////////////

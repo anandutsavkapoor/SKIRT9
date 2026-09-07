@@ -8,7 +8,6 @@
 #include "Constants.hpp"
 #include "DisjointWavelengthGrid.hpp"
 #include "FatalError.hpp"
-#include "GasLineEmission.hpp"
 #include "Log.hpp"
 #include "MaterialState.hpp"
 #include "NR.hpp"
@@ -429,7 +428,8 @@ void NonLTELineGasMix::setupSelfBefore()
     // load the atomic model (mass, energy levels, radiative and collisional transitions) using the
     // solver's shared loader; this issues no per-file log messages of its own (see loadAtomicModel()),
     // so a single summary message is issued below instead
-    GasLineEmission::loadAtomicModel(this, name, colNames, numEnergyLevels(), _model);
+    _gasLineEmission.initialize(this);
+    _gasLineEmission.loadAtomicModel(name, colNames, numEnergyLevels(), _model);
     auto log = find<Log>();
     log->info("Loaded atomic model for " + name + " from " + std::to_string(3 + 2 * colNames.size())
               + " resource files");
@@ -737,10 +737,6 @@ double NonLTELineGasMix::solveLevelPopulations(MaterialState* state, const Array
     env.nPartner.resize(numColPartners);
     for (int c = 0; c != numColPartners; ++c) env.nPartner[c] = state->colPartnerDensity(c);
     env.meanJ.assign(numLines, 0.);
-    {
-        auto log = find<Log>();
-        env.warn = [log](const std::string& message) { log->warning(message); };
-    }
 
     // calculate the mean intensity of the radiation field convolved over the normalized line profile g
     // for each radiative transition:
@@ -829,7 +825,7 @@ double NonLTELineGasMix::solveLevelPopulations(MaterialState* state, const Array
     // radiative terms (Einstein A always, Bul/Blu weighted by env.meanJ) and the collisional terms
     // (using _model.colPartner, with the same robustness against degenerate rates and densities),
     // and throws FatalError directly on a singular matrix or non-finite solution
-    std::vector<double> solution = GasLineEmission::solveLevelPopulations(_model, env);
+    std::vector<double> solution = _gasLineEmission.solveLevelPopulations(_model, env);
 
     // update the level populations, keeping track of the amount of change
     double change = 0.;

@@ -225,6 +225,10 @@ public:
         _clamp = clampFirstAxis;
     }
 
+    /** This function returns true if the stored table instance has been opened, false if not (i.e.
+        the instance was default constructed and open() has not yet been called). */
+    bool isOpen() const { return !_filePath.empty(); }
+
     /** The destructor breaks the association with a stored table resource file established by the
         alternate constructor or the open() function, if there is any. In practice, this simply
         means releasing the memory map on the associated file. */
