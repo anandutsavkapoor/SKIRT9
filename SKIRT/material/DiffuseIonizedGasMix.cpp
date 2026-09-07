@@ -1697,7 +1697,8 @@ int DiffuseIonizedGasMix::selectReemissionChannel(const MaterialState* state, do
         return -1;
     }
 
-    const ReemissionData& data = getReemissionData(state, lambda);
+    ReemissionData data;
+    calculateReemissionProbabilities(state, lambda, data);
 
     if (!data.valid)
     {
@@ -1820,20 +1821,6 @@ double DiffuseIonizedGasMix::sampleHeliumTwoPhotonContinuum(double temperature) 
 }
 
 ////////////////////////////////////////////////////////////////////
-
-const DiffuseIonizedGasMix::ReemissionData& DiffuseIonizedGasMix::getReemissionData(const MaterialState* state,
-                                                                                    double lambda) const
-{
-    // Use thread_local to ensure thread safety without mutex
-    static thread_local ReemissionData data;
-    if (state->numberDensity() <= 0.)
-    {
-        data.valid = false;
-        return data;
-    }
-    calculateReemissionProbabilities(state, lambda, data);
-    return data;
-}
 
 ////////////////////////////////////////////////////////////////////
 
@@ -2429,7 +2416,8 @@ void DiffuseIonizedGasMix::precomputeOpacityArrays(MaterialState* state, const A
         if (inReemissionRange)
         {
             // Get reemission data (includes all probabilities)
-            const ReemissionData& data = getReemissionData(state, lambda);
+            ReemissionData data;
+            calculateReemissionProbabilities(state, lambda, data);
 
             // Calculate hydrogen reemission probability
             double hydrogenScatProb = data.probabilities[ReemissionChannel::Hydrogen];

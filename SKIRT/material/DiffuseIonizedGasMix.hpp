@@ -417,7 +417,6 @@ private:
     double sampleHydrogenLymanContinuum(double temperature) const;
     double sampleHeliumLymanContinuum(double temperature) const;
     double sampleHeliumTwoPhotonContinuum(double temperature) const;
-    const ReemissionData& getReemissionData(const MaterialState* state, double lambda) const;
 
     // Hydrogen and Helium photoionization cross-section using Verner+ 96
     double getHydrogenCrossSection(double frequency) const;
