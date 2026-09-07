@@ -230,22 +230,20 @@ void DiffuseIonizedGasMix::setupSelfBefore()
     // delta_id indices in _dNAxisDeltaIds), and similarly for dC.
     if (useCloudyTemperature() || useCloudyOpacity())
     {
-        _deltaNMapTable.open(this, std::string("DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap"), "delta_id(1)",
-                             "delta_N(1)", true);
-        _deltaCMapTable.open(this, std::string("DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap"), "delta_id(1)",
-                             "delta_C(1)", true);
+        _deltaNMapTable.open(this, "DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap", "delta_id(1)", "delta_N(1)", true);
+        _deltaCMapTable.open(this, "DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap", "delta_id(1)", "delta_C(1)", true);
 
         const size_t nDelta = _deltaNMapTable.axisSize<0>();
         if (nDelta == 0 || _deltaCMapTable.axisSize<0>() != nDelta)
-            throw FATALERROR("DeltaMap table '" + std::string("DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap")
-                             + "' is empty or has mismatched delta_N/delta_C lengths");
+            throw FATALERROR("DeltaMap table 'DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap' is empty or has "
+                             "mismatched delta_N/delta_C lengths");
 
         // Treat anything within eps of zero as "exactly on the centre axis". DELTA_SAMPLES
         // values are written exactly, but floating-point round-trips through PTS storage
         // can introduce sub-ULP noise.
         constexpr double eps = 1e-9;
-        std::vector<std::pair<double, int>> dNcandidates;  // dN value, delta_id (entries with dC=0)
-        std::vector<std::pair<double, int>> dCcandidates;  // dC value, delta_id (entries with dN=0)
+        vector<std::pair<double, int>> dNcandidates;  // dN value, delta_id (entries with dC=0)
+        vector<std::pair<double, int>> dCcandidates;  // dC value, delta_id (entries with dN=0)
         for (int deltaId = 0; deltaId < static_cast<int>(nDelta); ++deltaId)
         {
             const double dN = _deltaNMapTable.valueAtIndices(static_cast<size_t>(deltaId));
@@ -256,14 +254,14 @@ void DiffuseIonizedGasMix::setupSelfBefore()
         }
 
         if (_deltaIdCentre < 0)
-            throw FATALERROR("DeltaMap table '" + std::string("DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap")
-                             + "': no centre entry (dN=0, dC=0) found");
+            throw FATALERROR(
+                "DeltaMap table 'DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap': no centre entry (dN=0, dC=0) found");
         if (dNcandidates.size() < 2)
-            throw FATALERROR("DeltaMap table '" + std::string("DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap")
-                             + "': dN axis has fewer than 2 grid points");
+            throw FATALERROR("DeltaMap table 'DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap': dN axis has fewer than "
+                             "2 grid points");
         if (dCcandidates.size() < 2)
-            throw FATALERROR("DeltaMap table '" + std::string("DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap")
-                             + "': dC axis has fewer than 2 grid points");
+            throw FATALERROR("DeltaMap table 'DiffuseIonizedGas5Bin_Standard_multiZ_DeltaMap': dC axis has fewer than "
+                             "2 grid points");
 
         std::sort(dNcandidates.begin(), dNcandidates.end());
         std::sort(dCcandidates.begin(), dCcandidates.end());
@@ -382,7 +380,7 @@ void DiffuseIonizedGasMix::setupSelfBefore()
             static const char* romans[] = {"I", "II", "III", "IV",   "V",   "VI", "VII", "VIII", "IX",
                                            "X", "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII"};
             static const char* metals[] = {"C", "N", "O", "Ne", "Mg", "Si", "S", "Fe"};
-            std::vector<GasLineEmission::SpeciesSpec> species;
+            vector<GasLineEmission::SpeciesSpec> species;
             for (int e = 0; e != 8; ++e)
             {
                 int elem = e + 2;
@@ -922,7 +920,7 @@ bool DiffuseIonizedGasMix::isSpecificStateConverged(int /*numCells*/, int numUpd
 
     // Compact single-line summary: header + 3 criteria flags.
     // Plateau history is appended when at least 2 samples are available.
-    std::string plateauHistory;
+    string plateauHistory;
     if (_convergedFractionHistory.size() >= 2)
     {
         plateauHistory = " ";
@@ -932,24 +930,24 @@ bool DiffuseIonizedGasMix::isSpecificStateConverged(int /*numCells*/, int numUpd
             if (i < _convergedFractionHistory.size() - 1) plateauHistory += "->";
         }
     }
-    log->info("DiffuseIonizedGasMix convergence: " + std::string(converged ? "CONVERGED" : "NOT CONVERGED")
-              + " | per-cell " + StringUtils::toString(convergedFraction * 100., 'f', 1) + "%/"
+    log->info("DiffuseIonizedGasMix convergence: " + string(converged ? "CONVERGED" : "NOT CONVERGED") + " | per-cell "
+              + StringUtils::toString(convergedFraction * 100., 'f', 1) + "%/"
               + StringUtils::toString((1.0 - maxFractionNotConvergedCells()) * 100., 'f', 1) + "% "
-              + std::string(standardConverged ? "PASS" : "FAIL") + " | plateau" + plateauHistory + " "
-              + std::string(stabilityConverged ? "PASS" : "FAIL") + " | global dnHII "
+              + string(standardConverged ? "PASS" : "FAIL") + " | plateau" + plateauHistory + " "
+              + string(stabilityConverged ? "PASS" : "FAIL") + " | global dnHII "
               + StringUtils::toString(globalChange * 100., 'f', 2) + "%/"
               + StringUtils::toString(maxChangeInGlobalIonizedH() * 100., 'f', 2) + "% "
-              + std::string(globalConverged ? "PASS" : "FAIL"));
+              + string(globalConverged ? "PASS" : "FAIL"));
 
     // Log n_HII-weighted mean ion fractions: <x_ion> = sum(x_ion * n_HII * V) / sum(n_HII * V)
     if (currentTotalIonizedH > 0.)
     {
-        std::string ionStr = "  Ion fractions (n_HII-weighted):";
+        string ionStr = "  Ion fractions (n_HII-weighted):";
         for (int i = 0; i < numIonFracAggs; ++i)
         {
             double currentVal = currentAggregate->ionFracAgg(i);
             double meanIonFrac = currentVal / currentTotalIonizedH;
-            ionStr += " " + std::string(ionFracAggTable[i].name).substr(16)  // strip "nHII_weighted_" prefix
+            ionStr += " " + string(ionFracAggTable[i].name).substr(16)  // strip "nHII_weighted_" prefix
                       + "=" + StringUtils::toString(meanIonFrac, 'e', 3);
             // Also log iteration-to-iteration change
             double previousVal = previousAggregate->ionFracAgg(i);
@@ -1451,8 +1449,8 @@ double DiffuseIonizedGasMix::calculateIonizationParameter(const Array& Jv, doubl
     // Calculate ionizing photon flux: phi = integ (4pi * J_lamb * lambda) / (h*c) dlambda
     // Only consider ionizing radiation (> 1 Ryd range)
 
-    std::vector<double> ionizing_wavelengths;
-    std::vector<double> photon_flux_integrand;
+    vector<double> ionizing_wavelengths;
+    vector<double> photon_flux_integrand;
 
     for (int i = 0; i < rfwlg->numBins(); i++)
     {
@@ -1497,8 +1495,8 @@ double DiffuseIonizedGasMix::calculateIonizationParameter(const Array& Jv, doubl
 // Helper functions for the diffuse reemision
 
 void DiffuseIonizedGasMix::interpolateReemissionSpectrum(int spectrumType, double temperature,
-                                                         std::vector<double>& wavelengths,
-                                                         std::vector<double>& cumulativeDist) const
+                                                         vector<double>& wavelengths,
+                                                         vector<double>& cumulativeDist) const
 {
     // Get wavelength grid from STAB table
     Array lambdaArray;
@@ -1548,8 +1546,8 @@ double DiffuseIonizedGasMix::sampleFromTemperatureDependentSpectrum(int spectrum
     // the same temperature reuse it instead of rebuilding it from STAB lookups.
     thread_local int cachedSpectrumType = -1;
     thread_local double cachedTemperature = 0.;
-    thread_local std::vector<double> cachedWavelengths;
-    thread_local std::vector<double> cachedCumulativeDist;
+    thread_local vector<double> cachedWavelengths;
+    thread_local vector<double> cachedCumulativeDist;
 
     if (spectrumType != cachedSpectrumType || temperature != cachedTemperature)
     {
@@ -1557,8 +1555,8 @@ double DiffuseIonizedGasMix::sampleFromTemperatureDependentSpectrum(int spectrum
         cachedSpectrumType = spectrumType;
         cachedTemperature = temperature;
     }
-    const std::vector<double>& wavelengths = cachedWavelengths;
-    const std::vector<double>& cumulativeDist = cachedCumulativeDist;
+    const vector<double>& wavelengths = cachedWavelengths;
+    const vector<double>& cumulativeDist = cachedCumulativeDist;
 
     // Sample using inverse transform method
     double x = random->uniform();
@@ -1954,8 +1952,8 @@ void DiffuseIonizedGasMix::calculateBinAverages(const Array& Jv, double* binAver
         const double binHighWavelength = binHighWl[bin];
 
         // Collect wavelengths and intensities in this bin
-        std::vector<double> binWavelengths;
-        std::vector<double> binIntensities;
+        vector<double> binWavelengths;
+        vector<double> binIntensities;
 
         for (int i = 0; i < rfwlg->numBins(); i++)
         {
@@ -2000,7 +1998,7 @@ void DiffuseIonizedGasMix::calculateBinAverages(const Array& Jv, double* binAver
 ////////////////////////////////////////////////////////////////////
 // Integration
 
-double DiffuseIonizedGasMix::integrate(const std::vector<double>& x, const std::vector<double>& y) const
+double DiffuseIonizedGasMix::integrate(const vector<double>& x, const vector<double>& y) const
 {
     // Input validation
     if (x.size() != y.size() || x.size() < 2)
@@ -2048,7 +2046,7 @@ double DiffuseIonizedGasMix::integrate(const std::vector<double>& x, const std::
 
 ////////////////////////////////////////////////////////////////////
 
-double DiffuseIonizedGasMix::integrateLinearSpace(const std::vector<double>& x, const std::vector<double>& y) const
+double DiffuseIonizedGasMix::integrateLinearSpace(const vector<double>& x, const vector<double>& y) const
 {
     const size_t n = x.size();
 
@@ -2087,11 +2085,11 @@ double DiffuseIonizedGasMix::integrateLinearSpace(const std::vector<double>& x, 
 
 ////////////////////////////////////////////////////////////////////
 
-double DiffuseIonizedGasMix::integrateLogSpace(const std::vector<double>& x, const std::vector<double>& y) const
+double DiffuseIonizedGasMix::integrateLogSpace(const vector<double>& x, const vector<double>& y) const
 {
     const size_t n = x.size();
-    std::vector<double> logY(n);
-    std::vector<bool> validPoints(n);
+    vector<double> logY(n);
+    vector<bool> validPoints(n);
 
     // Convert to log space, handling zeros and negative values
     for (size_t i = 0; i < n; ++i)
@@ -2164,7 +2162,7 @@ double DiffuseIonizedGasMix::integrateLogSpace(const std::vector<double>& x, con
 
 ////////////////////////////////////////////////////////////////////
 
-double DiffuseIonizedGasMix::simpsonIntegration(const std::vector<double>& x, const std::vector<double>& y) const
+double DiffuseIonizedGasMix::simpsonIntegration(const vector<double>& x, const vector<double>& y) const
 {
     const size_t n = x.size();
 
@@ -2205,8 +2203,7 @@ double DiffuseIonizedGasMix::simpsonIntegration(const std::vector<double>& x, co
 
 ////////////////////////////////////////////////////////////////////
 
-double DiffuseIonizedGasMix::trapezoidalIntegrationKahan(const std::vector<double>& x,
-                                                         const std::vector<double>& y) const
+double DiffuseIonizedGasMix::trapezoidalIntegrationKahan(const vector<double>& x, const vector<double>& y) const
 {
     const size_t n = x.size();
 
@@ -2660,8 +2657,8 @@ void DiffuseIonizedGasMix::computeCellDeltas(const MaterialState* state, double&
 
 ////////////////////////////////////////////////////////////////////
 
-void DiffuseIonizedGasMix::bracketDeltaAxis(double value, const std::vector<double>& axis_values,
-                                            const std::vector<int>& axis_deltaIds, int& deltaIdLo, int& deltaIdHi,
+void DiffuseIonizedGasMix::bracketDeltaAxis(double value, const vector<double>& axis_values,
+                                            const vector<int>& axis_deltaIds, int& deltaIdLo, int& deltaIdHi,
                                             double& w) const
 {
     const size_t n = axis_values.size();

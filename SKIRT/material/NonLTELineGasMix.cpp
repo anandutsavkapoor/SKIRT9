@@ -775,23 +775,20 @@ double NonLTELineGasMix::solveLevelPopulations(MaterialState* state, const Array
             vector<string> message1 = {
                 "Integral of Gaussian line profile over radiation field is inaccurate for ",
                 " " + _name + " for transition (" + StringUtils::toString(up) + "-" + StringUtils::toString(low) + ")",
-                std::string("  integral equals ") + StringUtils::toString(gsum) + " rather than unity",
-                std::string("  over wavelengths from ") + StringUtils::toString(units->owavelength(lambdamin)) + " "
+                "  integral equals " + StringUtils::toString(gsum) + " rather than unity",
+                "  over wavelengths from " + StringUtils::toString(units->owavelength(lambdamin)) + " "
                     + units->uwavelength() + " to " + StringUtils::toString(units->owavelength(lambdamax)) + " "
                     + units->uwavelength() + "."};
-            vector<string> message2 = {// Concatenate with std::string to include dynamic values
-                                       std::string(" 1. Set the wavelength coverage from a velocity window of "
-                                                   "±5 x total turbulent velocity (vturb) ")
-                                       + " (i.e., Vmin = -5 vturb, Vmax = +5 vturb) for the radiation field "
-                                         "and sample it with around 100"
-                                       + " points. The total turbulent velocity includes the micro-turbulent "
-                                         "velocity and thermal velocity."
-                                       + " Now, vturb = " + StringUtils::toString(units->ovelocity(sigma)) + " "
-                                       + units->uvelocity() + "."};
+            vector<string> message2 = {" 1. Set the wavelength coverage from a velocity window of ±5 x total turbulent "
+                                       "velocity (vturb) (i.e., Vmin = -5 vturb, Vmax = +5 vturb) for the radiation "
+                                       "field and sample it with around 100 points. The total turbulent velocity "
+                                       "includes the micro-turbulent velocity and thermal velocity. Now, vturb = "
+                                       + StringUtils::toString(units->ovelocity(sigma)) + " " + units->uvelocity()
+                                       + "."};
 
             if (abs(gsum - 1.) > MAX_GAUSS_ERROR_FAIL && errorForGaussianIntegral())
             {
-                log->info(std::string("Gausss(") + StringUtils::toString(_lambdav[ellmin])
+                log->info("Gausss(" + StringUtils::toString(_lambdav[ellmin])
                           + ")=" + StringUtils::toString(gaussian(_lambdav[ellmin], center, sigma)) + "Gausss("
                           + StringUtils::toString(_lambdav[ellmax - 1])
                           + ")=" + StringUtils::toString(gaussian(_lambdav[ellmax - 1], center, sigma)));
@@ -825,7 +822,7 @@ double NonLTELineGasMix::solveLevelPopulations(MaterialState* state, const Array
     // radiative terms (Einstein A always, Bul/Blu weighted by env.meanJ) and the collisional terms
     // (using _model.colPartner, with the same robustness against degenerate rates and densities),
     // and throws FatalError directly on a singular matrix or non-finite solution
-    std::vector<double> solution = _gasLineEmission.solveLevelPopulations(_model, env);
+    vector<double> solution = _gasLineEmission.solveLevelPopulations(_model, env);
 
     // update the level populations, keeping track of the amount of change
     double change = 0.;
@@ -866,10 +863,10 @@ bool NonLTELineGasMix::isSpecificStateConverged(int numCells, int /*numUpdated*/
         // log convergence info
         auto log = find<Log>();
         log->info("NonLTELineGasMix convergence info:");
-        log->info(std::string("  Fraction of not converged cells is ")
-                  + StringUtils::toString(fractionNotConverged * 100., 'f', 2) + "% (convergence criterion is "
+        log->info("  Fraction of not converged cells is " + StringUtils::toString(fractionNotConverged * 100., 'f', 2)
+                  + "% (convergence criterion is "
                   + StringUtils::toString(maxFractionNotConvergedCells() * 100., 'f', 2) + "%)");
-        log->info(std::string("  Global level populations changed by ")
+        log->info("  Global level populations changed by "
                   + StringUtils::toString(changeInGlobalLevelPops * 100., 'f', 2)
                   + "% compared to previous iteration (convergence criterion is "
                   + StringUtils::toString(maxChangeInGlobalLevelPopulations() * 100., 'f', 2) + "%)");
