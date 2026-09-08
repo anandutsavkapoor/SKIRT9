@@ -16,6 +16,7 @@
 #include "Random.hpp"
 #include "SnapshotParameter.hpp"
 #include "StringUtils.hpp"
+#include "VernerCrossSections.hpp"
 
 ////////////////////////////////////////////////////////////////////
 
@@ -2234,41 +2235,19 @@ double DiffuseIonizedGasMix::rydbergToWavelength(double energy_ryd) const
 ////////////////////////////////////////////////////////////////////
 
 double DiffuseIonizedGasMix::getHydrogenCrossSection(double frequency) const
-{  // Verner+ 96 fits
-    // Convert frequency to energy in eV
-    constexpr double h_eV = 4.135667696e-15;  // Planck constant in eVs
-    const double E_eV = h_eV * frequency;
-
-    constexpr double HI_eV = 13.6057;
-    if (E_eV < HI_eV || E_eV > 50000.) return 0.0;
-
-    const double x = E_eV / 0.4298;
-    const double xm1 = x - 1.;
-    const double sigma_cm2 = 5.475e-14 * xm1 * xm1 * pow(x, -4.0185) / pow(1. + sqrt(x / 32.88), 2.963);
-
-    // Convert from cm^2 to m^2
-    return sigma_cm2 * 1e-4;
+{
+    // convert frequency to photon energy in eV, then use the canonical Verner+96 fit
+    const double E_eV = Constants::h() * frequency / Constants::Qelectron();
+    return VernerCrossSections::sigmaHI(E_eV) * 1e-4;  // cm^2 -> m^2
 }
 
 ////////////////////////////////////////////////////////////////////
 
 double DiffuseIonizedGasMix::getHeliumCrossSection(double frequency) const
 {
-    // Verner+ 96 fits
-    // Convert frequency to energy in eV
-    constexpr double h_eV = 4.135667696e-15;  // Planck constant in eVs
-    const double E_eV = h_eV * frequency;
-
-    constexpr double HeI_eV = 24.5874;
-    if (E_eV < HeI_eV || E_eV > 50000.) return 0.0;
-
-    const double x = E_eV / 13.61 - 0.4434;
-    const double xm1 = x - 1.;
-    const double y = sqrt(x * x + 4.562496);
-    const double sigma_cm2 = 9.492e-16 * (xm1 * xm1 + 4.157521) * pow(y, -3.906) / pow(1. + sqrt(y / 1.469), 3.188);
-
-    // Convert from cm^2 to m^2
-    return sigma_cm2 * 1e-4;
+    // convert frequency to photon energy in eV, then use the canonical Verner+96 fit
+    const double E_eV = Constants::h() * frequency / Constants::Qelectron();
+    return VernerCrossSections::sigmaHeI(E_eV) * 1e-4;  // cm^2 -> m^2
 }
 
 ////////////////////////////////////////////////////////////////////
