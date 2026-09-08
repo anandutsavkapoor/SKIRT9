@@ -1081,8 +1081,13 @@ void GasLineEmission::initializeAtomicModels()
                     kbest = k;
                 }
             }
-            _atomicRegistry.lineModel[lineIdx] = slot;
-            _atomicRegistry.lineTransition[lineIdx] = kbest;
+            // leave the line unserved (lineModel/lineTransition already default to -1 above) if this
+            // model has no radiative transitions to map it to
+            if (kbest >= 0)
+            {
+                _atomicRegistry.lineModel[lineIdx] = slot;
+                _atomicRegistry.lineTransition[lineIdx] = kbest;
+            }
         }
     }
     _atomicRegistry.ready = true;
